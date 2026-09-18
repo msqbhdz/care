@@ -26,6 +26,13 @@ if (exprFileIndex > 0 && process.argv[exprFileIndex + 1]) {
 const port = 9600 + Math.floor(Math.random() * 300);
 const profile = path.join(process.env.TEMP, 'edge-shot-' + Date.now());
 
+/* 窗口尺寸可以用 --size 宽x高 指定,默认按普通手机 */
+let winSize = '420,860';
+const sizeIndex = process.argv.indexOf('--size');
+if (sizeIndex > 0 && process.argv[sizeIndex + 1]) {
+  winSize = process.argv[sizeIndex + 1].replace('x', ',');
+}
+
 function getJson(p) {
   return new Promise((resolve, reject) => {
     http.get({ host: '127.0.0.1', port, path: p, timeout: 3000 }, (res) => {
@@ -41,7 +48,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 (async () => {
   const child = spawn(EDGE, [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
-    '--hide-scrollbars', '--window-size=420,860',
+    '--hide-scrollbars', `--window-size=${winSize}`,
     `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, url
   ], { stdio: 'ignore' });
 

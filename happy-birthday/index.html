@@ -380,16 +380,15 @@
   }
 
   function drawCake(ctx, cx, baseY, glow) {
-    /* 尺寸按屏幕宽度缩放:手机上蛋糕太小会看不清 */
-    var scale = Math.max(0.85, Math.min(1.5, window.innerWidth / 400));
+    /* 尺寸按屏幕宽度缩放。上限压到 1.8:再大就会顶到上面的文字 */
+    var scale = Math.max(1.2, Math.min(1.8, window.innerWidth / 380));
     var widths = [110 * scale, 88 * scale, 68 * scale];
     var heights = [30 * scale, 26 * scale, 22 * scale];
     var gaps = [0, 4 * scale, 6 * scale];
-    var top = baseY;
     var i, k;
 
     ctx.save();
-    ctx.lineWidth = Math.max(1.5, 1.8 * scale);
+    ctx.lineWidth = Math.max(1.8, 2.1 * scale);
     ctx.lineCap = 'round';
     ctx.strokeStyle = '#FFE9C4';
 
@@ -432,7 +431,7 @@
     }
 
     /* 蜡烛 */
-    var candleH = 26 * scale, candleW = 7 * scale;
+    var candleH = 30 * scale, candleW = 7 * scale;
     var ctop = prevTop - candleH;
     ctx.strokeStyle = '#FFD166';
     ctx.lineWidth = Math.max(1.5, 1.8 * scale);
@@ -470,12 +469,15 @@
 
     /* 蛋糕背后暖色烛光 */
     var cakeX = W / 2;
-    var cakeBaseY = H - Math.min(150, H * 0.26);
-    var glowY = cakeBaseY - 110;      /* 对着火苗的位置 */
+    var cakeBaseY = H - Math.max(130, H * 0.20);
+    /* 蛋糕按屏幕缩放,光晕也要跟着变大,否则火光显得很小 */
+    var cakeScale = Math.max(1.2, Math.min(1.8, W / 380));
+    var glowY = cakeBaseY - 130 * cakeScale;      /* 对着火苗的位置 */
     var glow = 0.6 + 0.4 * Math.sin(t * 0.08);
-    var rg = ctx.createRadialGradient(cakeX, glowY, 4, cakeX, glowY, 120 + 40 * glow);
-    rg.addColorStop(0, 'rgba(255,165,61,' + (0.34 * (0.75 + 0.25 * glow)) + ')');
-    rg.addColorStop(0.5, 'rgba(255,165,61,0.09)');
+    var gRad = (115 + 40 * glow) * cakeScale;
+    var rg = ctx.createRadialGradient(cakeX, glowY, 4, cakeX, glowY, gRad);
+    rg.addColorStop(0, 'rgba(255,165,61,' + (0.38 * (0.75 + 0.25 * glow)) + ')');
+    rg.addColorStop(0.5, 'rgba(255,165,61,0.10)');
     rg.addColorStop(1, 'rgba(255,165,61,0)');
     ctx.fillStyle = rg;
     ctx.fillRect(0, 0, W, H);
@@ -524,28 +526,30 @@
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    var titleSize = Math.max(22, Math.min(38, W * 0.085));
+    var titleSize = Math.max(24, Math.min(42, W * 0.095));
     ctx.font = '700 ' + titleSize + 'px "PingFang SC","Microsoft YaHei UI",system-ui,sans-serif';
-    var titleY = Math.max(46, H * 0.11);
+    var titleY = Math.max(48, H * 0.115);
     ctx.fillStyle = 'rgba(77,107,254,0.85)';
     ctx.fillText('> Happy Birthday <', W / 2 + 1.5, titleY + 1.5);
     ctx.fillStyle = '#FFF3E0';
     ctx.fillText('> Happy Birthday <', W / 2, titleY);
 
-    var bodySize = Math.max(13, Math.min(17, W * 0.038));
+    /* 左侧祝福:字号跟着放大,位置贴住蛋糕中段 */
+    var bodySize = Math.max(17, Math.min(24, W * 0.048));
     ctx.font = '700 ' + bodySize + 'px "PingFang SC","Microsoft YaHei UI",system-ui,sans-serif';
     ctx.fillStyle = '#EAE2FF';
     ctx.textAlign = 'left';
-    var lx = Math.max(14, W * 0.05);
-    var leftY = cakeBaseY - 96;       /* 和蛋糕中段齐平 */
+    var lx = Math.max(14, W * 0.045);
+    var leftY = cakeBaseY - 200 * cakeScale;      /* 放在蛋糕上方,避免被烛火穿过 */
     ctx.fillText('美好的事物', lx, leftY);
-    ctx.fillText('一定会在新的一年如约而至', lx, leftY + bodySize * 1.65);
+    ctx.fillText('一定会在新的一年如约而至', lx, leftY + bodySize * 1.7);
 
-    var wishSize = Math.max(15, Math.min(22, W * 0.052));
+    /* 右下角愿望:放在蛋糕底边以下,避免压到蛋糕 */
+    var wishSize = Math.max(19, Math.min(28, W * 0.062));
     ctx.font = '700 ' + wishSize + 'px "PingFang SC","Microsoft YaHei UI",system-ui,sans-serif';
     ctx.textAlign = 'right';
-    var rx = W - Math.max(14, W * 0.05);
-    var wishY = cakeBaseY + 12;       /* 放到蛋糕底边以下,避免压到蛋糕 */
+    var rx = W - Math.max(14, W * 0.045);
+    var wishY = cakeBaseY + wishSize * 1.4;      /* 蛋糕底边以下,留出间距 */
     ctx.fillStyle = 'rgba(77,107,254,0.9)';
     ctx.fillText('许个心愿吧!', rx + 1.5, wishY + 1.5);
     ctx.fillStyle = '#FFF3E0';
