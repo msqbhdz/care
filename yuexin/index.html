@@ -113,7 +113,7 @@
 
     <div class="field">
       <label for="name">名字</label>
-      <input id="name" type="text" autocomplete="off" maxlength="2">
+      <input id="name" type="text" autocomplete="off" maxlength="8">
     </div>
 
     <button id="go">开始</button>
@@ -153,14 +153,20 @@ function makeMessage(name) {
   return n ? (n + ',你好臭~') : '你好臭~';
 }
 
-/* 名字太长时自动缩小字号,免得溢出屏幕 */
+/**
+ * 让文字塞进屏幕宽度:从 30px 起,放不下就逐级缩小。
+ *
+ * 网页版的对话框是网页元素画的,能自由伸缩,
+ * 所以不像窗口版那样有"最多 2 个字"的限制 ——
+ * 实测手机屏宽 390px 时,8 个字的文案缩到 20px 也才 238px,放得下。
+ */
 function fitBubbleText() {
+  const maxW = Math.min(window.innerWidth * 0.92, 560) - 44;   // 减去气泡内边距
   let size = 30;
   bubbleText.style.fontSize = size + 'px';
-  const maxW = Math.min(window.innerWidth * 0.9, 520);
   let guard = 0;
-  while (bubbleText.scrollWidth > maxW - 40 && size > 14 && guard++ < 40) {
-    size -= 2;
+  while (bubbleText.scrollWidth > maxW && size > 12 && guard++ < 60) {
+    size -= 1;
     bubbleText.style.fontSize = size + 'px';
   }
 }
