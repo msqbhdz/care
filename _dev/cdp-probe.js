@@ -11,11 +11,26 @@ const path = require('path');
 
 const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const url = process.argv[2];
-const exprIndex = process.argv.indexOf('--expr');
-const expression = exprIndex > 0 ? process.argv[exprIndex + 1] : '1+1';
+
+/* 表达式优先从文件读(长表达式经命令行容易被 shell 转义截断) */
+let expression = '1+1';
+const exprFileIndex = process.argv.indexOf('--expr-file');
+if (exprFileIndex > 0 && process.argv[exprFileIndex + 1]) {
+  expression = fs.readFileSync(process.argv[exprFileIndex + 1], 'utf8');
+} else {
+  const exprIndex = process.argv.indexOf('--expr');
+  if (exprIndex > 0) expression = process.argv[exprIndex + 1];
+}
 
 const port = 9411 + Math.floor(Math.random() * 200);
 const profile = path.join(process.env.TEMP, 'edge-cdp-' + Date.now());
+
+/* 页面就绪的判定表达式,可用 --ready "<js>" 覆盖 */
+let readyExpr = '(document.readyState === "complete") && (typeof window.__care !== "undefined")';
+const readyIndex = process.argv.indexOf('--ready');
+if (readyIndex > 0 && process.argv[readyIndex + 1]) {
+  readyExpr = process.argv[readyIndex + 1];
+}
 
 function getJson(pathname) {
   return new Promise((resolve, reject) => {
@@ -62,7 +77,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
         method: 'Runtime.evaluate',
         params: {
           expression: phase === 'wait'
-            ? '(document.readyState === "complete") && (typeof window.__care !== "undefined")'
+            ? readyExpr
             : expression,
           returnByValue: true,
           awaitPromise: true
