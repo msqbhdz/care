@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#12141A">
+<title>温馨提示</title>
+<style>
+  :root{--bg:#12141A;--text:#F2F5FF;--muted:#8B94AB;--btn:#4D6BFE;--line:#2C3345;--panel:#191D27;}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;margin:0;}
+  body{
+    background:var(--bg);color:var(--text);
+    font-family:"PingFang SC","Microsoft YaHei UI","Noto Sans CJK SC",system-ui,-apple-system,sans-serif;
+    display:flex;align-items:center;justify-content:center;padding:24px;
+  }
+  .wrap{width:100%;max-width:360px;}
+  h1{font-size:22px;margin:0 0 6px;text-align:center;}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 26px;text-align:center;line-height:1.7;}
+  a{
+    display:block;text-decoration:none;color:#fff;font-weight:700;font-size:16px;
+    background:var(--btn);border-radius:14px;padding:16px;margin-bottom:12px;
+    text-align:center;border:1px solid transparent;
+  }
+  a.ghost{background:transparent;border-color:var(--line);color:var(--text);font-weight:600;}
+  a:active{opacity:.85;}
+  a small{display:block;font-weight:400;font-size:12px;opacity:.75;margin-top:4px;}
+  .tip{
+    margin-top:20px;padding:14px;border-radius:12px;background:var(--panel);
+    border:1px solid var(--line);color:var(--muted);font-size:12px;line-height:1.8;
+  }
+  .tip b{color:var(--text);}
+  code{background:#0F1218;padding:1px 5px;border-radius:4px;color:#9FB4FF;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>温馨提示</h1>
+  <p class="sub">选一个打开</p>
+
+  <a href="guanxin/">只有关心话</a>
+  <a class="ghost" href="happy-birthday/">关心话 + 生日惊喜<small>后面藏了一个惊喜</small></a>
+
+  <div class="tip">
+    想让页面打开就带上名字?在链接后面加 <code>?name=名字</code><br>
+    例如 <b>…/guanxin/?name=小明</b>
+  </div>
+</div>
+</body>
+</html>

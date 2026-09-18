@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#12141A">
+<title>温馨提示</title>
+<style>
+  :root{
+    --bg:#12141A;
+    --panel:#191D27;
+    --line:#2C3345;
+    --text:#F2F5FF;
+    --muted:#8B94AB;
+    --btn:#4D6BFE;
+    --btn-off:#2A3145;
+    --card:#1B1F2B;
+    --card-line:#4D6BFE;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;margin:0;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:"PingFang SC","Microsoft YaHei UI","Noto Sans CJK SC",system-ui,-apple-system,sans-serif;
+    display:flex;justify-content:center;
+    overflow:hidden;              /* 卡片在页面里任意飞,不让页面滚动 */
+    user-select:none;
+  }
+  .app{
+    width:100%;max-width:460px;height:100dvh;
+    display:flex;flex-direction:column;
+    padding:calc(16px + env(safe-area-inset-top)) 18px calc(16px + env(safe-area-inset-bottom));
+    gap:14px;
+  }
+  header h1{margin:0;font-size:22px;letter-spacing:.5px;}
+  header p{margin:6px 0 0;font-size:13px;color:var(--muted);}
+
+  .field{display:flex;align-items:center;gap:10px;margin-top:6px;}
+  .field label{font-size:13px;color:var(--muted);white-space:nowrap;}
+  .field input{
+    flex:1;min-width:0;
+    font:inherit;font-size:15px;
+    color:var(--text);background:#0F1218;
+    border:1px solid var(--line);border-radius:10px;
+    padding:11px 12px;outline:none;
+  }
+  .field input:focus{border-color:var(--btn);}
+
+  .info{margin-top:4px;font-size:13px;color:var(--muted);line-height:1.9;}
+  .info b{color:var(--text);font-weight:600;}
+
+  .spacer{flex:1;}
+
+  button{
+    font:inherit;font-weight:700;font-size:16px;
+    border:0;border-radius:14px;
+    padding:16px 12px;
+    background:var(--btn);color:#fff;
+    cursor:pointer;
+    transition:background .15s;
+  }
+  button:disabled{background:var(--btn-off);color:var(--muted);}
+  .hint{text-align:center;font-size:12px;color:var(--muted);min-height:16px;}
+
+  /* 弹出来的关心话卡片 */
+  .card{
+    position:fixed;
+    background:var(--card);
+    border:1px solid var(--card-line);
+    border-radius:16px;
+    padding:14px 16px;
+    color:var(--text);
+    font-weight:700;
+    line-height:1.5;
+    box-shadow:0 6px 24px rgba(0,0,0,.45);
+    pointer-events:none;          /* 不挡点击 */
+    opacity:0;
+    transform:scale(.9);
+    animation:pop .32s cubic-bezier(.2,.9,.3,1.1) forwards;
+    word-break:break-word;
+  }
+  .card.out{animation:fade .45s ease forwards;}
+  @keyframes pop{
+    from{opacity:0;transform:scale(.9);}
+    to{opacity:1;transform:scale(1);}
+  }
+  @keyframes fade{
+    from{opacity:1;transform:scale(1);}
+    to{opacity:0;transform:scale(.96);}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>温馨提示</h1>
+    <p>点下面的按钮,弹出一批关心话</p>
+  </header>
+
+  <div class="field">
+    <label for="name">名字</label>
+    <input id="name" type="text" placeholder="填了会加在每句话前面" autocomplete="off">
+  </div>
+
+  <div class="info" id="info"></div>
+
+  <div class="spacer"></div>
+
+  <button id="go">弹出提醒</button>
+  <div class="hint" id="hint">准备就绪</div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ---------------- 关心话 ---------------- */
+  var PHRASES = [
+    '多喝水哦~', '保持微笑呀~', '每天都要元气满满~', '记得吃水果(●\'◡\'●)',
+    '今天有没有好好吃饭?', '好好爱自己~', '我一直在呢~', '梦想成真!',
+    '天天开心^_^', '照顾好自己~', '万事顺意~', '早点休息~',
+    '愿所有烦恼都消失~', '不要熬夜哦~', '今天过得开心嘛^_^', '天冷了,多穿衣服~',
+    '三分钟热度也会有三分收获', '小小努力也有大意义~', '辛苦啦,已经挺棒了~', '慢慢来,已经很棒了'
+  ];
+
+  var CARD_FONT = 16;
+  var CARD_PAD_X = 32;      /* 卡片左右内边距合计 */
+  var CARD_PAD_Y = 28;
+  var CARD_GAP = 8;         /* 卡片之间至少留的间距 */
+  var HOLD_MS = 1200;       /* 全部弹完后停留多久再收 */
+
+  var el = {
+    name: document.getElementById('name'),
+    info: document.getElementById('info'),
+    go: document.getElementById('go'),
+    hint: document.getElementById('hint')
+  };
+
+  /** 按屏幕大小决定弹几张 —— 手机少一点,大屏多一点。 */
+  function cardCount() {
+    var w = window.innerWidth, h = window.innerHeight;
+    var n = Math.round((w * h) / 26000);
+    return Math.max(8, Math.min(26, n));
+  }
+
+  /** 每张卡片停多久(秒)。 */
+  var staySeconds = 4;
+
+  function refreshInfo() {
+    el.info.innerHTML =
+      '每次弹出:<b>' + cardCount() + '</b> 张<br>' +
+      '每张停留:<b>' + staySeconds + '</b> 秒后自动消失<br>' +
+      '出现位置:<b>全屏随机</b>';
+  }
+
+  /** 给一句话加上名字前缀。名字为空就原样返回。 */
+  function withName(name, phrase) {
+    if (!name) return phrase;
+    var t = name.trim();
+    if (!t) return phrase;
+    return t + ',' + phrase;
+  }
+
+  /** 随机取一句,尽量不和上一句重复。 */
+  var lastPhrase = null;
+  function pickPhrase() {
+    var p;
+    do {
+      p = PHRASES[Math.floor(Math.random() * PHRASES.length)];
+    } while (PHRASES.length > 1 && p === lastPhrase);
+    lastPhrase = p;
+    return p;
+  }
+
+  /** 量出一段文字在给定字号下需要多大。 */
+  function measure(text) {
+    var probe = document.createElement('div');
+    probe.style.cssText = 'position:fixed;left:-9999px;top:0;visibility:hidden;' +
+      'font-size:' + CARD_FONT + 'px;font-weight:700;line-height:1.5;' +
+      'font-family:"PingFang SC","Microsoft YaHei UI",system-ui,sans-serif;' +
+      'max-width:' + Math.round(window.innerWidth * 0.8) + 'px;' +
+      'word-break:break-word;padding:0;border:0;';
+    probe.textContent = text;
+    document.body.appendChild(probe);
+    var r = { w: probe.offsetWidth + CARD_PAD_X, h: probe.offsetHeight + CARD_PAD_Y };
+    document.body.removeChild(probe);
+    return r;
+  }
+
+  /** 已有的卡片占位,用来尽量避免重叠。 */
+  var placed = [];
+
+  function overlaps(x, y, w, h) {
+    for (var i = 0; i < placed.length; i++) {
+      var p = placed[i];
+      if (x < p.x + p.w + CARD_GAP && x + w + CARD_GAP > p.x &&
+          y < p.y + p.h + CARD_GAP && y + h + CARD_GAP > p.y) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** 给卡片找一个尽量不重叠的随机位置。 */
+  function place(size) {
+    var maxX = Math.max(0, window.innerWidth - size.w);
+    var maxY = Math.max(0, window.innerHeight - size.h);
+    var best = null;
+    for (var i = 0; i < 60; i++) {
+      var x = Math.random() * maxX;
+      var y = Math.random() * maxY;
+      if (!overlaps(x, y, size.w, size.h)) {
+        return { x: x, y: y };
+      }
+      if (!best) best = { x: x, y: y };
+    }
+    return best;   /* 实在放不下就随便放,允许重叠 */
+  }
+
+  var cards = [];
+  var running = false;
+
+  /** 铺一轮:先把卡片全放好(立刻可见),再一起淡出。 */
+  function run() {
+    if (running) return;
+    running = true;
+    el.go.disabled = true;
+    el.hint.textContent = '正在弹出……';
+
+    var name = el.name.value;
+    var n = cardCount();
+    var created = [];
+
+    for (var i = 0; i < n; i++) {
+      var text = withName(name, pickPhrase());
+      var size = measure(text);
+
+      var card = document.createElement('div');
+      card.className = 'card';
+      card.style.fontSize = CARD_FONT + 'px';
+      card.style.maxWidth = Math.round(window.innerWidth * 0.8) + 'px';
+      card.textContent = text;
+
+      var pos = place(size);
+      card.style.left = Math.round(pos.x) + 'px';
+      card.style.top = Math.round(pos.y) + 'px';
+      card.style.animationDelay = (i * 28) + 'ms';   /* 陆续出现,有节奏 */
+
+      document.body.appendChild(card);
+      placed.push({ x: pos.x, y: pos.y, w: size.w, h: size.h });
+      created.push(card);
+    }
+
+    el.hint.textContent = '已弹出 ' + n + ' 张,' + staySeconds + ' 秒后自动消失';
+
+    var holdFor = HOLD_MS + n * 28;
+    setTimeout(function () {
+      created.forEach(function (c, idx) {
+        setTimeout(function () { c.classList.add('out'); }, idx * 20);
+      });
+      setTimeout(function () {
+        created.forEach(function (c) { if (c.parentNode) c.parentNode.removeChild(c); });
+        placed = [];
+        running = false;
+        el.go.disabled = false;
+        el.hint.textContent = '已全部消失,可以再点一次';
+      }, 500 + n * 20);
+    }, holdFor);
+  }
+
+  el.go.addEventListener('click', run);
+  el.name.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') run();
+  });
+  window.addEventListener('resize', function () {
+    if (!running) refreshInfo();
+  });
+
+  /* 链接里可以带名字:?name=小明 —— 打开就自动填好,方便给不同的人各发一条链接 */
+  (function prefillName() {
+    try {
+      var m = /[?&]name=([^&]*)/.exec(window.location.search);
+      if (m) {
+        var v = decodeURIComponent(m[1].replace(/\+/g, ' '));
+        if (v) el.name.value = v;
+      }
+    } catch (e) { /* 参数有问题就忽略 */ }
+  })();
+
+  refreshInfo();
+
+  /* 调试出口:控制台里可以查看状态、直接推进,方便排查 */
+  window.__care = {
+    phrases: PHRASES,
+    cardCount: cardCount,
+    withName: withName,
+    run: run,
+    isRunning: function () { return running; },
+    liveCards: function () { return document.querySelectorAll('.card').length; },
+    holdMs: function () { return HOLD_MS; },
+    staySeconds: function () { return staySeconds; }
+  };
+})();
+</script>
+</body>
+</html>

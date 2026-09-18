@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#12141A">
+<title>温馨提示</title>
+<style>
+  :root{
+    --bg:#12141A;
+    --panel:#191D27;
+    --line:#2C3345;
+    --text:#F2F5FF;
+    --muted:#8B94AB;
+    --btn:#4D6BFE;
+    --btn-off:#2A3145;
+    --card:#1B1F2B;
+    --card-line:#4D6BFE;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;margin:0;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:"PingFang SC","Microsoft YaHei UI","Noto Sans CJK SC",system-ui,-apple-system,sans-serif;
+    display:flex;justify-content:center;
+    overflow:hidden;
+    user-select:none;
+  }
+  .app{
+    width:100%;max-width:460px;height:100dvh;
+    display:flex;flex-direction:column;
+    padding:calc(16px + env(safe-area-inset-top)) 18px calc(16px + env(safe-area-inset-bottom));
+    gap:14px;
+  }
+  header h1{margin:0;font-size:22px;letter-spacing:.5px;}
+  header p{margin:6px 0 0;font-size:13px;color:var(--muted);}
+
+  .field{display:flex;align-items:center;gap:10px;margin-top:6px;}
+  .field label{font-size:13px;color:var(--muted);white-space:nowrap;}
+  .field input{
+    flex:1;min-width:0;
+    font:inherit;font-size:15px;
+    color:var(--text);background:#0F1218;
+    border:1px solid var(--line);border-radius:10px;
+    padding:11px 12px;outline:none;
+  }
+  .field input:focus{border-color:var(--btn);}
+
+  .info{margin-top:4px;font-size:13px;color:var(--muted);line-height:1.9;}
+  .info b{color:var(--text);font-weight:600;}
+
+  .spacer{flex:1;}
+
+  button{
+    font:inherit;font-weight:700;font-size:16px;
+    border:0;border-radius:14px;
+    padding:16px 12px;
+    background:var(--btn);color:#fff;
+    cursor:pointer;
+    transition:background .15s;
+  }
+  button:disabled{background:var(--btn-off);color:var(--muted);}
+  .hint{text-align:center;font-size:12px;color:var(--muted);min-height:16px;}
+
+  /* 弹出来的关心话卡片 */
+  .card{
+    position:fixed;
+    background:var(--card);
+    border:1px solid var(--card-line);
+    border-radius:16px;
+    padding:14px 16px;
+    color:var(--text);
+    font-weight:700;
+    line-height:1.5;
+    box-shadow:0 6px 24px rgba(0,0,0,.45);
+    pointer-events:none;
+    opacity:0;
+    transform:scale(.9);
+    animation:pop .32s cubic-bezier(.2,.9,.3,1.1) forwards;
+    word-break:break-word;
+  }
+  .card.out{animation:fade .45s ease forwards;}
+  @keyframes pop{
+    from{opacity:0;transform:scale(.9);}
+    to{opacity:1;transform:scale(1);}
+  }
+  @keyframes fade{
+    from{opacity:1;transform:scale(1);}
+    to{opacity:0;transform:scale(.96);}
+  }
+
+  /* 生日动画:整屏盖住页面 */
+  #stage{
+    position:fixed;inset:0;
+    display:none;
+    opacity:0;
+    transition:opacity .5s ease;
+    z-index:50;
+  }
+  #stage.on{display:block;}
+  #stage.vis{opacity:1;}
+  #stage canvas{width:100%;height:100%;display:block;}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>温馨提示</h1>
+    <p>点下面的按钮,弹出一批关心话</p>
+  </header>
+
+  <div class="field">
+    <label for="name">名字</label>
+    <input id="name" type="text" placeholder="填了会加在每句话前面" autocomplete="off">
+  </div>
+
+  <div class="info" id="info"></div>
+
+  <div class="spacer"></div>
+
+  <button id="go">弹出提醒</button>
+  <div class="hint" id="hint">准备就绪</div>
+</div>
+
+<div id="stage"><canvas id="cv"></canvas></div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ---------------- 关心话 ---------------- */
+  var PHRASES = [
+    '多喝水哦~', '保持微笑呀~', '每天都要元气满满~', '记得吃水果(●\'◡\'●)',
+    '今天有没有好好吃饭?', '好好爱自己~', '我一直在呢~', '梦想成真!',
+    '天天开心^_^', '照顾好自己~', '万事顺意~', '早点休息~',
+    '愿所有烦恼都消失~', '不要熬夜哦~', '今天过得开心嘛^_^', '天冷了,多穿衣服~',
+    '三分钟热度也会有三分收获', '小小努力也有大意义~', '辛苦啦,已经挺棒了~', '慢慢来,已经很棒了'
+  ];
+
+  var CARD_FONT = 16;
+  var CARD_PAD_X = 32;
+  var CARD_PAD_Y = 28;
+  var CARD_GAP = 8;
+  var HOLD_MS = 1200;
+  var BIRTHDAY_DELAY_MS = 1000;   /* 卡片全消失后空一拍,再出动画 */
+
+  var el = {
+    name: document.getElementById('name'),
+    info: document.getElementById('info'),
+    go: document.getElementById('go'),
+    hint: document.getElementById('hint'),
+    stage: document.getElementById('stage'),
+    cv: document.getElementById('cv')
+  };
+
+  function cardCount() {
+    var n = Math.round((window.innerWidth * window.innerHeight) / 26000);
+    return Math.max(8, Math.min(26, n));
+  }
+
+  var staySeconds = 4;
+
+  function refreshInfo() {
+    el.info.innerHTML =
+      '每次弹出:<b>' + cardCount() + '</b> 张<br>' +
+      '每张停留:<b>' + staySeconds + '</b> 秒后自动消失<br>' +
+      '出现位置:<b>全屏随机</b>';
+  }
+
+  function withName(name, phrase) {
+    if (!name) return phrase;
+    var t = name.trim();
+    if (!t) return phrase;
+    return t + ',' + phrase;
+  }
+
+  var lastPhrase = null;
+  function pickPhrase() {
+    var p;
+    do {
+      p = PHRASES[Math.floor(Math.random() * PHRASES.length)];
+    } while (PHRASES.length > 1 && p === lastPhrase);
+    lastPhrase = p;
+    return p;
+  }
+
+  function measure(text) {
+    var probe = document.createElement('div');
+    probe.style.cssText = 'position:fixed;left:-9999px;top:0;visibility:hidden;' +
+      'font-size:' + CARD_FONT + 'px;font-weight:700;line-height:1.5;' +
+      'font-family:"PingFang SC","Microsoft YaHei UI",system-ui,sans-serif;' +
+      'max-width:' + Math.round(window.innerWidth * 0.8) + 'px;' +
+      'word-break:break-word;padding:0;border:0;';
+    probe.textContent = text;
+    document.body.appendChild(probe);
+    var r = { w: probe.offsetWidth + CARD_PAD_X, h: probe.offsetHeight + CARD_PAD_Y };
+    document.body.removeChild(probe);
+    return r;
+  }
+
+  var placed = [];
+
+  function overlaps(x, y, w, h) {
+    for (var i = 0; i < placed.length; i++) {
+      var p = placed[i];
+      if (x < p.x + p.w + CARD_GAP && x + w + CARD_GAP > p.x &&
+          y < p.y + p.h + CARD_GAP && y + h + CARD_GAP > p.y) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function place(size) {
+    var maxX = Math.max(0, window.innerWidth - size.w);
+    var maxY = Math.max(0, window.innerHeight - size.h);
+    var best = null;
+    for (var i = 0; i < 60; i++) {
+      var x = Math.random() * maxX;
+      var y = Math.random() * maxY;
+      if (!overlaps(x, y, size.w, size.h)) return { x: x, y: y };
+      if (!best) best = { x: x, y: y };
+    }
+    return best;
+  }
+
+  var running = false;
+
+  /** 铺一轮关心话。onDone 在全部卡片消失后调用。 */
+  function run(onDone) {
+    if (running) return;
+    running = true;
+    el.go.disabled = true;
+    el.hint.textContent = '正在弹出……';
+
+    var name = el.name.value;
+    var n = cardCount();
+    var created = [];
+
+    for (var i = 0; i < n; i++) {
+      var text = withName(name, pickPhrase());
+      var size = measure(text);
+
+      var card = document.createElement('div');
+      card.className = 'card';
+      card.style.fontSize = CARD_FONT + 'px';
+      card.style.maxWidth = Math.round(window.innerWidth * 0.8) + 'px';
+      card.textContent = text;
+
+      var pos = place(size);
+      card.style.left = Math.round(pos.x) + 'px';
+      card.style.top = Math.round(pos.y) + 'px';
+      card.style.animationDelay = (i * 28) + 'ms';
+
+      document.body.appendChild(card);
+      placed.push({ x: pos.x, y: pos.y, w: size.w, h: size.h });
+      created.push(card);
+    }
+
+    el.hint.textContent = '已弹出 ' + n + ' 张,' + staySeconds + ' 秒后自动消失';
+
+    setTimeout(function () {
+      created.forEach(function (c, idx) {
+        setTimeout(function () { c.classList.add('out'); }, idx * 20);
+      });
+      setTimeout(function () {
+        created.forEach(function (c) { if (c.parentNode) c.parentNode.removeChild(c); });
+        placed = [];
+        running = false;
+        if (onDone) onDone();
+      }, 500 + n * 20);
+    }, HOLD_MS + n * 28);
+  }
+
+  /* ================= 生日动画 ================= */
+
+  var stage = {
+    ctx: null, cv: null, W: 0, H: 0, dpr: 1,
+    timer: null, ticks: 0,
+    particles: [], confetti: [],
+    running: false
+  };
+
+  var PARTICLE_N = 70;      /* 手机上粒子数减半,保证流畅 */
+
+  function initStage() {
+    stage.cv = el.cv;
+    stage.ctx = el.cv.getContext('2d');
+    resizeStage();
+    window.addEventListener('resize', resizeStage);
+  }
+
+  function resizeStage() {
+    if (!stage.ctx) return;
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    stage.dpr = dpr;
+    stage.W = window.innerWidth;
+    stage.H = window.innerHeight;
+    stage.cv.width = Math.round(stage.W * dpr);
+    stage.cv.height = Math.round(stage.H * dpr);
+    stage.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  /** 一朵烟花:粒子向外飞散 */
+  function burst(cx, cy) {
+    var baseHue = Math.random() * 360;
+    var n = PARTICLE_N;
+    for (var i = 0; i < n; i++) {
+      var a = Math.random() * Math.PI * 2;
+      var sp = 1.0 + Math.random() * 3.2;
+      stage.particles.push({
+        x: cx, y: cy,
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        life: 45 + Math.random() * 50,
+        maxLife: 45 + Math.random() * 50,
+        hue: Math.random() < 0.25 ? -1 : (baseHue + (Math.random() - 0.5) * 40 + 360) % 360,
+        size: 1.4 + Math.random() * 2.0
+      });
+    }
+  }
+
+  /** 撒花:从顶部落下的小方块 */
+  function spawnConfetti() {
+    if (stage.ticks % 4 !== 0) return;
+    stage.confetti.push({
+      x: Math.random() * stage.W,
+      y: -10,
+      vx: (Math.random() - 0.5) * 0.6,
+      vy: 0.7 + Math.random() * 1.2,
+      size: 2 + Math.random() * 3,
+      hue: Math.random() * 360,
+      spin: Math.random() * Math.PI,
+      life: 260
+    });
+  }
+
+  /** 手绘蛋糕:抖动线条 + 双线描边,和电脑版一个思路 */
+  function wobblyLine(ctx, x1, y1, x2, y2, jitter) {
+    ctx.beginPath();
+    ctx.moveTo(x1 + (Math.random() * 2 - 1) * jitter, y1 + (Math.random() * 2 - 1) * jitter);
+    var segs = 3;
+    for (var i = 1; i <= segs; i++) {
+      var t = i / segs;
+      var ex = x1 + (x2 - x1) * t;
+      var ey = y1 + (y2 - y1) * t;
+      var cx = x1 + (x2 - x1) * (t - 0.5 / segs) + (Math.random() * 2 - 1) * jitter * 1.6;
+      var cy = y1 + (y2 - y1) * (t - 0.5 / segs) + (Math.random() * 2 - 1) * jitter * 1.6;
+      ctx.quadraticCurveTo(cx, cy, ex + (Math.random() * 2 - 1) * jitter * 0.5,
+                                  ey + (Math.random() * 2 - 1) * jitter * 0.5);
+    }
+    ctx.stroke();
+  }
+
+  function drawCake(ctx, cx, baseY, glow) {
+    /* 尺寸按屏幕宽度缩放:手机上蛋糕太小会看不清 */
+    var scale = Math.max(0.85, Math.min(1.5, window.innerWidth / 400));
+    var widths = [110 * scale, 88 * scale, 68 * scale];
+    var heights = [30 * scale, 26 * scale, 22 * scale];
+    var gaps = [0, 4 * scale, 6 * scale];
+    var top = baseY;
+    var i, k;
+
+    ctx.save();
+    ctx.lineWidth = Math.max(1.5, 1.8 * scale);
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#FFE9C4';
+
+    var prevTop = baseY;
+    for (i = 0; i < widths.length; i++) {
+      var w = widths[i], h = heights[i];
+      var t = prevTop - h - gaps[i];
+      var left = cx - w / 2, right = cx + w / 2;
+
+      /* 外框:左右竖线 + 底边(手绘抖动) */
+      wobblyLine(ctx, left, t + 6 * scale, left, t + h, 1.2);
+      wobblyLine(ctx, right, t + 6 * scale, right, t + h, 1.2);
+      wobblyLine(ctx, left, t + h, right, t + h, 1.2);
+
+      /* 顶部奶油波浪 */
+      ctx.beginPath();
+      ctx.moveTo(left + 3, t + 6 * scale);
+      var bumps = Math.max(3, Math.round(w / (16 * scale)));
+      var step = (w - 6) / bumps;
+      for (k = 0; k < bumps; k++) {
+        var x1 = left + 3 + k * step;
+        ctx.quadraticCurveTo(x1 + step * 0.25, t + 1 + (Math.random() * 2 - 1),
+                             x1 + step * 0.5, t + 6 * scale);
+        ctx.quadraticCurveTo(x1 + step * 0.75, t + 11 + (Math.random() * 2 - 1),
+                             x1 + step, t + 6 * scale);
+      }
+      ctx.stroke();
+
+      /* 侧面排线 */
+      var lines = Math.max(2, Math.round(w / (22 * scale)));
+      ctx.save();
+      ctx.strokeStyle = '#E8C99A';
+      ctx.lineWidth = Math.max(1, 1.2 * scale);
+      for (k = 0; k < lines; k++) {
+        var lx = left + (k + 0.8) * (w / (lines + 1));
+        wobblyLine(ctx, lx, t + 13 * scale, lx, t + h - 4, 1.0);
+      }
+      ctx.restore();
+      prevTop = t;
+    }
+
+    /* 蜡烛 */
+    var candleH = 26 * scale, candleW = 7 * scale;
+    var ctop = prevTop - candleH;
+    ctx.strokeStyle = '#FFD166';
+    ctx.lineWidth = Math.max(1.5, 1.8 * scale);
+    wobblyLine(ctx, cx - candleW / 2, ctop, cx - candleW / 2, prevTop, 0.8);
+    wobblyLine(ctx, cx + candleW / 2, ctop, cx + candleW / 2, prevTop, 0.8);
+
+    /* 火苗:外光晕 + 亮心 */
+    var flameBase = ctop - 4 * scale;
+    var g;
+    for (i = 3; i >= 1; i--) {
+      var rw = (4 + i * 2.6) * scale, rh = (10 + i * 4.6) * scale;
+      g = ctx.createRadialGradient(cx, flameBase - rh * 0.4, 1, cx, flameBase - rh * 0.4, rw * 1.6);
+      g.addColorStop(0, 'rgba(255,179,61,' + (0.17 * i * glow) + ')');
+      g.addColorStop(1, 'rgba(255,179,61,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(cx, flameBase - rh * 0.4, rw, rh, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = '#FFF3C4';
+    ctx.beginPath();
+    ctx.ellipse(cx, flameBase - 6 * scale, 2.6 * scale, 6 * scale, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawStage() {
+    var ctx = stage.ctx;
+    var W = stage.W, H = stage.H;
+    var t = stage.ticks;
+
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#12141A';
+    ctx.fillRect(0, 0, W, H);
+
+    /* 蛋糕背后暖色烛光 */
+    var cakeX = W / 2;
+    var cakeBaseY = H - Math.min(150, H * 0.26);
+    var glowY = cakeBaseY - 110;      /* 对着火苗的位置 */
+    var glow = 0.6 + 0.4 * Math.sin(t * 0.08);
+    var rg = ctx.createRadialGradient(cakeX, glowY, 4, cakeX, glowY, 120 + 40 * glow);
+    rg.addColorStop(0, 'rgba(255,165,61,' + (0.34 * (0.75 + 0.25 * glow)) + ')');
+    rg.addColorStop(0.5, 'rgba(255,165,61,0.09)');
+    rg.addColorStop(1, 'rgba(255,165,61,0)');
+    ctx.fillStyle = rg;
+    ctx.fillRect(0, 0, W, H);
+
+    /* 粒子 */
+    var i, p;
+    for (i = stage.particles.length - 1; i >= 0; i--) {
+      p = stage.particles[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.045;
+      p.vx *= 0.985;
+      p.vy *= 0.985;
+      p.life--;
+      if (p.life <= 0) { stage.particles.splice(i, 1); continue; }
+      var a = Math.max(0, p.life / p.maxLife);
+      ctx.globalAlpha = a;
+      ctx.fillStyle = p.hue < 0 ? '#FFFFFF' : 'hsl(' + p.hue + ',75%,62%)';
+      var s = p.size * (0.6 + a * 0.6);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    /* 撒花 */
+    for (i = stage.confetti.length - 1; i >= 0; i--) {
+      var c = stage.confetti[i];
+      c.x += c.vx + Math.sin((t + c.y) * 0.05) * 0.4;
+      c.y += c.vy;
+      c.spin += 0.1;
+      c.life--;
+      if (c.life <= 0 || c.y > H + 20) { stage.confetti.splice(i, 1); continue; }
+      ctx.save();
+      ctx.translate(c.x, c.y);
+      ctx.rotate(c.spin);
+      ctx.fillStyle = 'hsl(' + c.hue + ',80%,62%)';
+      ctx.fillRect(-c.size / 2, -c.size / 2, c.size, c.size * 1.6);
+      ctx.restore();
+    }
+
+    /* 蛋糕 */
+    drawCake(ctx, cakeX, cakeBaseY, glow);
+
+    /* 文字 */
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    var titleSize = Math.max(22, Math.min(38, W * 0.085));
+    ctx.font = '700 ' + titleSize + 'px "PingFang SC","Microsoft YaHei UI",system-ui,sans-serif';
+    var titleY = Math.max(46, H * 0.11);
+    ctx.fillStyle = 'rgba(77,107,254,0.85)';
+    ctx.fillText('> Happy Birthday <', W / 2 + 1.5, titleY + 1.5);
+    ctx.fillStyle = '#FFF3E0';
+    ctx.fillText('> Happy Birthday <', W / 2, titleY);
+
+    var bodySize = Math.max(13, Math.min(17, W * 0.038));
+    ctx.font = '700 ' + bodySize + 'px "PingFang SC","Microsoft YaHei UI",system-ui,sans-serif';
+    ctx.fillStyle = '#EAE2FF';
+    ctx.textAlign = 'left';
+    var lx = Math.max(14, W * 0.05);
+    var leftY = cakeBaseY - 96;       /* 和蛋糕中段齐平 */
+    ctx.fillText('美好的事物', lx, leftY);
+    ctx.fillText('一定会在新的一年如约而至', lx, leftY + bodySize * 1.65);
+
+    var wishSize = Math.max(15, Math.min(22, W * 0.052));
+    ctx.font = '700 ' + wishSize + 'px "PingFang SC","Microsoft YaHei UI",system-ui,sans-serif';
+    ctx.textAlign = 'right';
+    var rx = W - Math.max(14, W * 0.05);
+    var wishY = cakeBaseY + 12;       /* 放到蛋糕底边以下,避免压到蛋糕 */
+    ctx.fillStyle = 'rgba(77,107,254,0.9)';
+    ctx.fillText('许个心愿吧!', rx + 1.5, wishY + 1.5);
+    ctx.fillStyle = '#FFF3E0';
+    ctx.fillText('许个心愿吧!', rx, wishY);
+
+    ctx.textAlign = 'center';
+
+    /* 动画推进 */
+    stage.ticks++;
+    if (stage.ticks % 90 === 0) {
+      burst(W * (0.2 + Math.random() * 0.6), H * (0.12 + Math.random() * 0.3));
+    }
+    spawnConfetti();
+  }
+
+  /** 播放生日动画,持续 seconds 秒后自动收场并回调。 */
+  function showBirthday(seconds, onFinished) {
+    if (stage.running) return;
+    stage.running = true;
+    stage.ticks = 0;
+    stage.particles = [];
+    stage.confetti = [];
+    resizeStage();
+
+    /* 开场先来两朵,别让画面空着 */
+    burst(stage.W * 0.5, stage.H * 0.22);
+    burst(stage.W * 0.28, stage.H * 0.32);
+
+    el.stage.classList.add('on');
+    /* 下一帧再加 vis,让过渡生效 */
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () { el.stage.classList.add('vis'); });
+    });
+
+    var last = performance.now();
+    var elapsed = 0;
+    function frame(now) {
+      var dt = now - last;
+      last = now;
+      elapsed += dt;
+      drawStage();
+      if (elapsed >= seconds * 1000) {
+        cancelAnimationFrame(stage.timer);
+        el.stage.classList.remove('vis');
+        setTimeout(function () {
+          el.stage.classList.remove('on');
+          stage.running = false;
+          if (onFinished) onFinished();
+        }, 500);
+        return;
+      }
+      stage.timer = requestAnimationFrame(frame);
+    }
+    stage.timer = requestAnimationFrame(frame);
+  }
+
+  /* ================= 串起来 ================= */
+
+  el.go.addEventListener('click', function () {
+    run(function () {
+      /* 关心话全部消失后:空一拍,再出动画 —— 制造"已经结束了"的错觉 */
+      el.hint.textContent = '已全部消失';
+      setTimeout(function () {
+        el.hint.textContent = '准备中……';
+        showBirthday(10, function () {
+          el.go.disabled = false;
+          el.hint.textContent = '已全部消失,可以再点一次';
+        });
+      }, BIRTHDAY_DELAY_MS);
+    });
+  });
+  el.name.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') el.go.click();
+  });
+  window.addEventListener('resize', function () {
+    if (!running && !stage.running) refreshInfo();
+  });
+
+  /* 链接里可以带名字:?name=小明 */
+  (function prefillName() {
+    try {
+      var m = /[?&]name=([^&]*)/.exec(window.location.search);
+      if (m) {
+        var v = decodeURIComponent(m[1].replace(/\+/g, ' '));
+        if (v) el.name.value = v;
+      }
+    } catch (e) { /* 忽略 */ }
+  })();
+
+  initStage();
+  refreshInfo();
+
+  /* 调试出口 */
+  window.__care = {
+    phrases: PHRASES,
+    cardCount: cardCount,
+    withName: withName,
+    run: run,
+    isRunning: function () { return running; },
+    liveCards: function () { return document.querySelectorAll('.card').length; },
+    staySeconds: function () { return staySeconds; },
+    stageRunning: function () { return stage.running; },
+    stageVisible: function () { return el.stage.classList.contains('on'); },
+    particles: function () { return stage.particles.length; },
+    confetti: function () { return stage.confetti.length; },
+    showBirthday: showBirthday,
+    drawOnce: function () { resizeStage(); drawStage(); },
+    burst: burst
+  };
+})();
+</script>
+</body>
+</html>
