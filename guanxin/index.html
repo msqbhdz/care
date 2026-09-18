@@ -137,11 +137,10 @@
     hint: document.getElementById('hint')
   };
 
-  /** 按屏幕大小决定弹几张 —— 手机少一点,大屏多一点。 */
+  /** 按屏幕大小决定弹几张 —— 和电脑版保持一致的密度感。
+   *  手机屏幕小,52 张必然重叠,所以靠下面的网格算法保证"铺得均匀"而不是挤成一团。 */
   function cardCount() {
-    var w = window.innerWidth, h = window.innerHeight;
-    var n = Math.round((w * h) / 26000);
-    return Math.max(8, Math.min(26, n));
+    return 52;
   }
 
   /** 每张卡片停多久(秒)。 */
@@ -188,34 +187,57 @@
     return r;
   }
 
-  /** 已有的卡片占位,用来尽量避免重叠。 */
-  var placed = [];
+  /** 给卡片找位置:优先用均匀网格,放不下再退回随机撒点(接受重叠)。
+   *
+   *  为什么用网格:卡片数量多到必然重叠时,纯随机撒点会挤成几团、留出大块空白;
+   *  按格子分配则能铺满整个屏幕,看起来是"密"而不是"乱"。 */
+  function placeAll(sizes) {
+    var W = window.innerWidth, H = window.innerHeight;
+    var n = sizes.length;
 
-  function overlaps(x, y, w, h) {
-    for (var i = 0; i < placed.length; i++) {
-      var p = placed[i];
-      if (x < p.x + p.w + CARD_GAP && x + w + CARD_GAP > p.x &&
-          y < p.y + p.h + CARD_GAP && y + h + CARD_GAP > p.y) {
-        return true;
+    /* 格数按面积估:让每格接近卡片大小 */
+    var avgArea = 0;
+    for (var i = 0; i < n; i++) avgArea += sizes[i].w * sizes[i].h;
+    avgArea = Math.max(1, avgArea / n);
+    var cell = Math.max(56, Math.min(150, Math.sqrt(avgArea)));
+    var cols = Math.max(1, Math.round(W / cell));
+    var rows = Math.max(1, Math.ceil(n / cols));
+
+    var cellsOrder = [];
+    for (i = 0; i < cols * rows; i++) cellsOrder.push(i);
+    for (i = cellsOrder.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var t = cellsOrder[i]; cellsOrder[i] = cellsOrder[j]; cellsOrder[j] = t;
+    }
+
+    var cellW = W / cols, cellH = H / rows;
+    var out = [];
+    for (i = 0; i < n; i++) {
+      var size = sizes[i];
+      if (i < cellsOrder.length) {
+        var idx = cellsOrder[i];
+        var cx = (idx % cols) * cellW;
+        var cy = Math.floor(idx / cols) * cellH;
+        /* 格内随机抖动,避免排得太整齐 */
+        var jx = (Math.random() - 0.5) * Math.max(0, cellW - size.w) * 0.7;
+        var jy = (Math.random() - 0.5) * Math.max(0, cellH - size.h) * 0.7;
+        out.push({
+          x: clamp(cx + (cellW - size.w) / 2 + jx, 0, W - size.w),
+          y: clamp(cy + (cellH - size.h) / 2 + jy, 0, H - size.h)
+        });
+      } else {
+        /* 格子不够了:空格子里补不上,就随机放 */
+        out.push({
+          x: Math.random() * Math.max(0, W - size.w),
+          y: Math.random() * Math.max(0, H - size.h)
+        });
       }
     }
-    return false;
+    return out;
   }
 
-  /** 给卡片找一个尽量不重叠的随机位置。 */
-  function place(size) {
-    var maxX = Math.max(0, window.innerWidth - size.w);
-    var maxY = Math.max(0, window.innerHeight - size.h);
-    var best = null;
-    for (var i = 0; i < 60; i++) {
-      var x = Math.random() * maxX;
-      var y = Math.random() * maxY;
-      if (!overlaps(x, y, size.w, size.h)) {
-        return { x: x, y: y };
-      }
-      if (!best) best = { x: x, y: y };
-    }
-    return best;   /* 实在放不下就随便放,允许重叠 */
+  function clamp(v, lo, hi) {
+    return v < lo ? lo : (v > hi ? hi : v);
   }
 
   var cards = [];
@@ -231,37 +253,40 @@
     var name = el.name.value;
     var n = cardCount();
     var created = [];
+    var texts = [];
+    var sizes = [];
+    var i;
 
-    for (var i = 0; i < n; i++) {
-      var text = withName(name, pickPhrase());
-      var size = measure(text);
+    /* 先算好每张的文案和尺寸 —— 网格放置需要先知道全部尺寸 */
+    for (i = 0; i < n; i++) {
+      texts.push(withName(name, pickPhrase()));
+      sizes.push(measure(texts[i]));
+    }
+    var positions = placeAll(sizes);
 
+    for (i = 0; i < n; i++) {
       var card = document.createElement('div');
       card.className = 'card';
       card.style.fontSize = CARD_FONT + 'px';
       card.style.maxWidth = Math.round(window.innerWidth * 0.8) + 'px';
-      card.textContent = text;
-
-      var pos = place(size);
-      card.style.left = Math.round(pos.x) + 'px';
-      card.style.top = Math.round(pos.y) + 'px';
-      card.style.animationDelay = (i * 28) + 'ms';   /* 陆续出现,有节奏 */
+      card.textContent = texts[i];
+      card.style.left = Math.round(positions[i].x) + 'px';
+      card.style.top = Math.round(positions[i].y) + 'px';
+      card.style.animationDelay = (i * 16) + 'ms';   /* 陆续出现,有节奏 */
 
       document.body.appendChild(card);
-      placed.push({ x: pos.x, y: pos.y, w: size.w, h: size.h });
       created.push(card);
     }
 
     el.hint.textContent = '已弹出 ' + n + ' 张,' + staySeconds + ' 秒后自动消失';
 
-    var holdFor = HOLD_MS + n * 28;
+    var holdFor = HOLD_MS + n * 16;
     setTimeout(function () {
       created.forEach(function (c, idx) {
         setTimeout(function () { c.classList.add('out'); }, idx * 20);
       });
       setTimeout(function () {
         created.forEach(function (c) { if (c.parentNode) c.parentNode.removeChild(c); });
-        placed = [];
         running = false;
         el.go.disabled = false;
         el.hint.textContent = '已全部消失,可以再点一次';

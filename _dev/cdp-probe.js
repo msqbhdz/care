@@ -54,16 +54,34 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   const ws = new WebSocket(target.webSocketDebuggerUrl);
   const result = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('求值超时')), 20000);
-    ws.onopen = () => {
+    const timer = setTimeout(() => reject(new Error('求值超时')), 30000);
+    let phase = 'wait';
+    const ask = () => {
       ws.send(JSON.stringify({
-        id: 1,
+        id: phase === 'wait' ? 100 : 1,
         method: 'Runtime.evaluate',
-        params: { expression, returnByValue: true, awaitPromise: true }
+        params: {
+          expression: phase === 'wait'
+            ? '(document.readyState === "complete") && (typeof window.__care !== "undefined")'
+            : expression,
+          returnByValue: true,
+          awaitPromise: true
+        }
       }));
     };
+    ws.onopen = () => ask();
     ws.onmessage = (ev) => {
       const msg = JSON.parse(ev.data);
+      if (msg.id === 100) {
+        /* 页面还没就绪,等一会再问 */
+        if (msg.result && msg.result.result && msg.result.result.value === true) {
+          phase = 'eval';
+          ask();
+        } else {
+          setTimeout(ask, 250);
+        }
+        return;
+      }
       if (msg.id !== 1) return;
       clearTimeout(timer);
       if (msg.result && msg.result.exceptionDetails) {
@@ -72,7 +90,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
         resolve(msg.result.result.value);
       }
     };
-    ws.onerror = (e) => { clearTimeout(timer); reject(new Error('WebSocket 出错')); };
+    ws.onerror = () => { clearTimeout(timer); reject(new Error('WebSocket 出错')); };
   });
 
   console.log(typeof result === 'string' ? result : JSON.stringify(result, null, 2));
