@@ -32,6 +32,13 @@ if (readyIndex > 0 && process.argv[readyIndex + 1]) {
   readyExpr = process.argv[readyIndex + 1];
 }
 
+/* 视口尺寸,可用 --size 宽x高 指定(默认按普通手机,不指定就跟随窗口) */
+let winSize = null;
+const sizeIndex = process.argv.indexOf('--size');
+if (sizeIndex > 0 && process.argv[sizeIndex + 1]) {
+  winSize = process.argv[sizeIndex + 1].replace('x', ',');
+}
+
 function getJson(pathname) {
   return new Promise((resolve, reject) => {
     http.get({ host: '127.0.0.1', port, path: pathname, timeout: 3000 }, (res) => {
@@ -47,10 +54,13 @@ function getJson(pathname) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
-  const child = spawn(EDGE, [
+  const edgeArgs = [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
     `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, url
-  ], { stdio: 'ignore', detached: false });
+  ];
+  if (winSize) edgeArgs.splice(0, 0, `--window-size=${winSize}`);
+
+  const child = spawn(EDGE, edgeArgs, { stdio: 'ignore', detached: false });
 
   let targets = null;
   for (let i = 0; i < 60; i++) {

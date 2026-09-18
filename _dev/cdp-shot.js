@@ -33,6 +33,16 @@ if (sizeIndex > 0 && process.argv[sizeIndex + 1]) {
   winSize = process.argv[sizeIndex + 1].replace('x', ',');
 }
 
+/*
+ * 缩放系数。headless Edge 的窗口有最小宽度(约 500px),
+ * 想模拟更窄的手机就得靠这个:窗口 500px + 缩放 1.3 -> CSS 视口约 385px。
+ */
+let dsf = null;
+const dsfIndex = process.argv.indexOf('--dsf');
+if (dsfIndex > 0 && process.argv[dsfIndex + 1]) {
+  dsf = process.argv[dsfIndex + 1];
+}
+
 function getJson(p) {
   return new Promise((resolve, reject) => {
     http.get({ host: '127.0.0.1', port, path: p, timeout: 3000 }, (res) => {
@@ -46,11 +56,13 @@ function getJson(p) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
-  const child = spawn(EDGE, [
+  const args = [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
     '--hide-scrollbars', `--window-size=${winSize}`,
     `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, url
-  ], { stdio: 'ignore' });
+  ];
+  if (dsf) args.splice(4, 0, `--force-device-scale-factor=${dsf}`);
+  const child = spawn(EDGE, args, { stdio: 'ignore' });
 
   let targets = null;
   for (let i = 0; i < 60; i++) {

@@ -113,7 +113,7 @@
 
     <div class="field">
       <label for="name">名字</label>
-      <input id="name" type="text" autocomplete="off" maxlength="8">
+      <input id="name" type="text" autocomplete="off" maxlength="12">
     </div>
 
     <button id="go">开始</button>
@@ -156,12 +156,17 @@ function makeMessage(name) {
 /**
  * 让文字塞进屏幕宽度:从 30px 起,放不下就逐级缩小。
  *
- * 网页版的对话框是网页元素画的,能自由伸缩,
- * 所以不像窗口版那样有"最多 2 个字"的限制 ——
- * 实测手机屏宽 390px 时,8 个字的文案缩到 20px 也才 238px,放得下。
+ * 网页版的对话框是网页元素画的,能自由伸缩,所以没有"最多 2 个字"那种硬限制。
+ * 实测(手机屏宽 390px,气泡内边距+边框 38px):
+ *     6 字以内  30px  很舒服
+ *     8 字      28px
+ *    10 字      24px
+ *    12 字      21px  仍然清楚
+ *    20 字      14px  技术上限,但已经偏小了
+ * 所以输入框限到 12 字,兼顾长度和可读性。
  */
 function fitBubbleText() {
-  const maxW = Math.min(window.innerWidth * 0.92, 560) - 44;   // 减去气泡内边距
+  const maxW = Math.min(window.innerWidth * 0.94, 560) - 44;   // 减去气泡内边距
   let size = 30;
   bubbleText.style.fontSize = size + 'px';
   let guard = 0;
@@ -169,6 +174,8 @@ function fitBubbleText() {
     size -= 1;
     bubbleText.style.fontSize = size + 'px';
   }
+  /* 极端情况:缩到下限还是放不下,就允许换行,免得溢出屏幕 */
+  bubbleText.style.whiteSpace = bubbleText.scrollWidth > maxW ? 'normal' : 'nowrap';
 }
 
 /* ---------- 画布 ---------- */
