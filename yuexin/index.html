@@ -91,24 +91,29 @@
     letter-spacing:1px;
   }
 
-  /* 返回键:固定在底部中间,不遮挡猫 */
+  /* 返回键:固定在底部中间,不遮挡猫。
+     抬高到 28px + 安全区,免得被手机浏览器底部工具栏挡住;
+     z-index 给足,保证在最上层。 */
   #back{
     position:fixed;
     left:50%;
-    bottom:calc(16px + env(safe-area-inset-bottom));
+    bottom:calc(28px + env(safe-area-inset-bottom, 0px));
     transform:translateX(-50%);
+    z-index:99;
     width:auto;                 /* 不加这句会被拉伸到超出视口 */
     white-space:nowrap;
-    font:inherit;font-size:14px;font-weight:600;
-    color:var(--muted);
-    background:var(--panel);
-    border:1px solid var(--line);
+    font:inherit;font-size:15px;font-weight:600;
+    color:var(--text);
+    background:rgba(25,29,39,.92);
+    border:1px solid #3A4356;
     border-radius:999px;
-    padding:9px 22px;
+    padding:11px 26px;
     cursor:pointer;
-    opacity:.85;
+    box-shadow:0 4px 16px rgba(0,0,0,.5);
+    -webkit-backdrop-filter:blur(8px);
+    backdrop-filter:blur(8px);
   }
-  #back:active{opacity:1;background:#222836;}
+  #back:active{background:#2A3145;}
 
   /* 尾巴:一个旋转 45 度的方块,只有下半截露在对话框外面,看起来就是向下的尖角 */
   #bubble .tail{
