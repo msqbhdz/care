@@ -89,7 +89,28 @@
     line-height:1.35;
     white-space:nowrap;
     letter-spacing:1px;
-  }  /* 尾巴:一个旋转 45 度的方块,只有下半截露在对话框外面,看起来就是向下的尖角 */
+  }
+
+  /* 返回键:固定在底部中间,不遮挡猫 */
+  #back{
+    position:fixed;
+    left:50%;
+    bottom:calc(16px + env(safe-area-inset-bottom));
+    transform:translateX(-50%);
+    width:auto;                 /* 不加这句会被拉伸到超出视口 */
+    white-space:nowrap;
+    font:inherit;font-size:14px;font-weight:600;
+    color:var(--muted);
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:999px;
+    padding:9px 22px;
+    cursor:pointer;
+    opacity:.85;
+  }
+  #back:active{opacity:1;background:#222836;}
+
+  /* 尾巴:一个旋转 45 度的方块,只有下半截露在对话框外面,看起来就是向下的尖角 */
   #bubble .tail{
     position:absolute;
     left:34px;
@@ -127,6 +148,7 @@
     <span class="tail" aria-hidden="true"></span>
   </div>
   <canvas id="stage"></canvas>
+  <button id="back">← 返回</button>
 </div>
 
 <script>
@@ -244,7 +266,15 @@ function start() {
   drawFrame(CAT.frames[0]);
 }
 
+/** 返回第一屏,可以重新填名字。名字保留在输入框里,方便改。 */
+function back() {
+  show.classList.remove('on');
+  panel.classList.remove('hide');
+  nameInput.focus();
+}
+
 document.getElementById('go').addEventListener('click', start);
+document.getElementById('back').addEventListener('click', back);
 nameInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') start();
 });
@@ -255,6 +285,8 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') { e.preventDefault(); playing = !playing; }
   else if (e.code === 'ArrowUp') fps = Math.min(30, fps + 2);
   else if (e.code === 'ArrowDown') fps = Math.max(4, fps - 2);
+  /* 在猫那一屏按 Esc 或退格,也当返回 */
+  else if (e.code === 'Escape' && show.classList.contains('on')) back();
 });
 window.addEventListener('resize', () => {
   if (show.classList.contains('on')) { fitBubbleText(); drawFrame(CAT.frames[frameIndex]); }
