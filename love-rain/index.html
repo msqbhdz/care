@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>爱心流星雨背景</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{
+    width:100%;height:100%;
+    background:#000;
+    overflow:hidden;
+  }
+  /* 铺满整个窗口,不留边 */
+  #scene{
+    display:block;
+    width:100vw;
+    height:100vh;
+    touch-action:none;
+  }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+<script>
+/*
+ * 爱心流星雨背景
+ *
+ * 纯 Canvas 画的,不用任何图片素材、不联网、零依赖。
+ * 双击 index.html 就能看。
+ */
+
+/* ================================================================ 可调参数 */
+
+const CONFIG = {
+  /* 主爱心 */
+  heartPoints: 460,        // 轮廓上铺多少个粒子
+  heartWobble: 1.6,        // 粒子偏离轮廓的幅度(格)
+  minSize: 7,              // 粒子最小尺寸(px,按 900 高度基准)
+  maxSize: 22,             // 粒子最大尺寸
+  cleftBoost: 2.4,         // 中间竖柱的粒子密度倍数
+
+  /* 背景碎心 */
+  bgCount: 110,
+  bgMinSize: 5,
+  bgMaxSize: 13,
+  bgAlpha: 0.30,           // 背景碎心整体透明度
+
+  /* 动画 */
+  beatSpeed: 1.15,         // 呼吸速度(越大越快)
+  beatAmount: 0.035,       // 呼吸幅度(0.035 = ±3.5%)
+  rotateSpeed: 0.055,      // 整颗爱心缓慢旋转(弧度/秒)
+  rotateAmount: 0.035,     // 旋转幅度(弧度)
+
+  /* 流星 */
+  meteorEvery: [0.07, 0.3], // 每隔多少秒来一颗(随机区间)—— 这是"流星雨"级密度
+  meteorMax: 34,           // 同时最多几颗
+  meteorLen: [140, 620],   // 拖尾长度(px,按 900 高度基准)
+  meteorSpeed: [420, 900], // 飞行速度(px/秒,按 900 高度基准)
+
+  /* 配色 */
+  hue: 338,                // 主色相 338 ≈ 粉红
+  bgHue: 340,              // 背景碎心的色相
+
+  /* 性能 */
+  maxDPR: 2,               // 设备像素比上限(手机太高的 DPR 会拖慢)
+};
+
+/* ================================================================ 基础工具 */
+
+const TAU = Math.PI * 2;
+const rand = (a, b) => a + Math.random() * (b - a);
+const randInt = (a, b) => Math.floor(rand(a, b + 1));
+
+/**
+ * 爱心参数方程。
+ *   x = 16 sin³t
+ *   y = 13 cos t − 5 cos 2t − 2 cos 3t − cos 4t
+ * 返回的是数学坐标(y 朝上),绘制时取负。
+ */
+function heartPoint(t) {
+  return {
+    x: 16 * Math.pow(Math.sin(t), 3),
+    y: 13 * Math.cos(t) - 5 * Math.cos(2 * t)
+       - 2 * Math.cos(3 * t) - Math.cos(4 * t),
+  };
+}
+
+/* 心形曲线的实际包围盒(算一次就够) */
+const HEART_BOX = (() => {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (let i = 0; i <= 3000; i++) {
+    const p = heartPoint((i / 3000) * TAU);
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+  }
+  return { minX, maxX, minY, maxY, w: maxX - minX, h: maxY - minY };
+})();
+
+/* ================================================================ 小心形贴图 */
+
+/**
+ * 每个粒子都是一个小爱心。实时画贝塞尔太慢,
+ * 所以按"色相 + 尺寸"预渲染成小 canvas 缓存起来复用。
+ */
+const spriteCache = new Map();
+
+function heartSprite(size, hue, light) {
+  const key = size + '|' + Math.round(hue) + '|' + Math.round(light * 20);
+  const hit = spriteCache.get(key);
+  if (hit) return hit;
+
+  const pad = 2;
+  const s = Math.max(4, Math.round(size));
+  const c = document.createElement('canvas');
+  c.width = c.height = s + pad * 2;
+
+  const g = c.getContext('2d');
+  g.translate(c.width / 2, c.height / 2);
+  const k = s / 32;                       // 方程值域约 ±16,缩放到 s
+
+  g.beginPath();
+  for (let i = 0; i <= 64; i++) {
+    const p = heartPoint((i / 64) * TAU);
+    const x = p.x * k;
+    const y = -p.y * k * 1.05;
+    if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+  }
+  g.closePath();
+
+  /* 中心亮、边缘粉,做出发光感 */
+  const grad = g.createRadialGradient(0, -s * 0.08, s * 0.04, 0, 0, s * 0.62);
+  grad.addColorStop(0, 'hsl(' + hue + ',100%,' + Math.round(light * 100) + '%)');
+  grad.addColorStop(0.55, 'hsl(' + hue + ',95%,72%)');
+  grad.addColorStop(1, 'hsl(' + hue + ',90%,58%)');
+  g.fillStyle = grad;
+  g.fill();
+
+  spriteCache.set(key, c);
+  return c;
+}
+
+/* ================================================================ 流星贴图 */
+
+/**
+ * 流星也预渲染成贴图。
+ *
+ * 为什么要这样:每帧给每颗流星新建一个 createLinearGradient,
+ * 同屏几十颗时开销很大。预渲染一次后只用 drawImage + rotate,
+ * 既快又能开很高的流星密度。
+ *
+ * 贴图朝右画,头部在右侧(headX),绘制时按飞行方向旋转。
+ */
+const meteorCache = new Map();
+
+function meteorSprite(len, width, hue) {
+  const L = Math.max(24, Math.round(len));
+  const W = Math.max(4, Math.round(width * 3));      // 留出光晕余量
+  const key = L + '|' + W + '|' + Math.round(hue);
+  const hit = meteorCache.get(key);
+  if (hit) return hit;
+
+  const pad = 6;
+  const c = document.createElement('canvas');
+  c.width = L + pad * 2;
+  c.height = W + pad * 2;
+  const g = c.getContext('2d');
+  const cy = c.height / 2;
+  const headX = c.width - pad;                       // 头部靠右
+
+  /* 拖尾:从头部往左渐隐 */
+  const grad = g.createLinearGradient(headX, cy, headX - L, cy);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.12, 'hsla(' + hue + ',100%,92%,0.75)');
+  grad.addColorStop(0.45, 'hsla(' + hue + ',95%,82%,0.28)');
+  grad.addColorStop(1, 'hsla(' + hue + ',90%,80%,0)');
+
+  g.strokeStyle = grad;
+  g.lineWidth = width;
+  g.lineCap = 'round';
+  g.beginPath();
+  g.moveTo(headX, cy);
+  g.lineTo(headX - L, cy);
+  g.stroke();
+
+  /* 头部亮点(又亮又小,像流星的头) */
+  const hg = g.createRadialGradient(headX, cy, 0, headX, cy, width * 1.6);
+  hg.addColorStop(0, 'rgba(255,255,255,1)');
+  hg.addColorStop(0.5, 'hsla(' + hue + ',100%,88%,0.5)');
+  hg.addColorStop(1, 'hsla(' + hue + ',100%,85%,0)');
+  g.fillStyle = hg;
+  g.beginPath();
+  g.arc(headX, cy, width * 1.6, 0, TAU);
+  g.fill();
+
+  c.headX = headX;                                    // 供绘制时定位
+  meteorCache.set(key, c);
+  return c;
+}
+
+/* ================================================================ 场景对象 */
+
+class HeartScene {
+  constructor(canvas) {
+    this.cv = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.t = 0;
+    this.meteors = [];
+    this.nextMeteor = rand(0.3, 1.2);
+    this.particles = [];
+    this.bg = [];
+    this.resize();
+    this.build();
+  }
+
+  resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, CONFIG.maxDPR);
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    this.cv.width = Math.round(w * dpr);
+    this.cv.height = Math.round(h * dpr);
+    this.cv.style.width = w + 'px';
+    this.cv.style.height = h + 'px';
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.w = w;
+    this.h = h;
+
+    /* 所有尺寸按"画面高度 / 900"缩放,这样大小屏观感一致 */
+    this.scale = Math.min(w, h) / 760;
+    this.scale = Math.max(0.45, Math.min(2.4, this.scale));
+
+    /* 爱心占画面高度的 66%,但不超过宽度的 78% */
+    const byH = h * 0.66;
+    const byW = (w * 0.78) * (HEART_BOX.h / HEART_BOX.w);
+    this.heartH = Math.min(byH, byW);
+    this.unit = this.heartH / HEART_BOX.h;   // 方程单位 -> 像素
+
+    /* 视觉居中:方程的重心偏下,往上提一点 */
+    this.cx = w / 2;
+    this.cy = h / 2 + (HEART_BOX.h / 2 + HEART_BOX.minY) * this.unit * 0.42;
+  }
+
+  /** 把方程坐标转成屏幕坐标(带整体呼吸与旋转) */
+  project(p, beat, rot) {
+    const cos = Math.cos(rot), sin = Math.sin(rot);
+    const x = p.x * this.unit * beat;
+    const y = -p.y * this.unit * beat;
+    return {
+      x: this.cx + x * cos - y * sin,
+      y: this.cy + x * sin + y * cos,
+    };
+  }
+
+  build() {
+    /* ---- 主爱心:沿轮廓铺粒子 ---- */
+    this.particles = [];
+    for (let i = 0; i < CONFIG.heartPoints; i++) {
+      const t = (i / CONFIG.heartPoints) * TAU;
+      const p = heartPoint(t);
+
+      /* 中间竖柱(尖顶附近)多加一些粒子,做出视频里那道密集的柱 */
+      const isCleft = Math.abs(p.x) < 2.2 && p.y > 0;
+      const n = isCleft ? Math.round(CONFIG.cleftBoost) : 1;
+
+      for (let k = 0; k < n; k++) {
+        this.particles.push({
+          t: t,
+          /* 在方程点附近做小抖动,免得排得太整齐 */
+          jx: rand(-CONFIG.heartWobble, CONFIG.heartWobble),
+          jy: rand(-CONFIG.heartWobble, CONFIG.heartWobble),
+          /* 尺寸:每个粒子固定,但整体随机分布 */
+          size: rand(CONFIG.minSize, CONFIG.maxSize) * this.scale,
+          /* 明暗呼吸:各自不同的相位,闪烁才自然 */
+          phase: rand(0, TAU),
+          speed: rand(0.7, 1.8),
+          light: rand(0.72, 0.98),
+          hue: CONFIG.hue + rand(-8, 8),
+        });
+      }
+    }
+
+    /* ---- 背景碎心 ---- */
+    this.bg = [];
+    for (let i = 0; i < CONFIG.bgCount; i++) {
+      this.bg.push({
+        x: Math.random() * this.w,
+        y: Math.random() * this.h,
+        size: rand(CONFIG.bgMinSize, CONFIG.bgMaxSize) * this.scale,
+        /* 缓慢漂移 */
+        vx: rand(-7, 7),
+        vy: rand(-5, 5),
+        phase: rand(0, TAU),
+        speed: rand(0.4, 1.1),
+        hue: CONFIG.bgHue + rand(-12, 14),
+      });
+    }
+
+    /* 按最新尺寸重建贴图缓存(尺寸变了缓存要清) */
+    spriteCache.clear();
+    meteorCache.clear();
+  }
+
+  /* ---------------------------------------------------------- 流星 */
+
+  spawnMeteor() {
+    if (this.meteors.length >= CONFIG.meteorMax) return;
+    const len = rand(CONFIG.meteorLen[0], CONFIG.meteorLen[1]) * this.scale;
+
+    /*
+     * 方向:始终朝【左下】飞。
+     * 角度取 0.72π(≈130°),此时
+     *     vx = cos(130°) = -0.64  -> 向左
+     *     vy = sin(130°) = +0.77  -> 向下
+     *
+     * 注意:屏幕坐标里 y 向下就是正方向,所以 vy 直接用 sin 即可,
+     * 不要再取负 —— 多写一个 -1 会让流星往上飞(曾经踩过这个坑)。
+     */
+    const angle = Math.PI * (0.72 + rand(-0.045, 0.045));
+    const speed = rand(CONFIG.meteorSpeed[0], CONFIG.meteorSpeed[1]) * this.scale;
+
+    /*
+     * 起点只在【右上区域】,这样看起来就是"从右上角射过来"。
+     * 如果起点铺满全屏(尤其偏左),就会出现"从左边飞出去"的怪现象。
+     */
+    const startX = this.w * rand(0.62, 1.15);
+    const startY = this.h * rand(-0.12, 0.55);
+
+    this.meteors.push({
+      x: startX,
+      y: startY,
+      vx: Math.cos(angle) * speed,        // 负:向左
+      vy: Math.sin(angle) * speed,        // 正:向下
+      len: len,
+      life: rand(2.0, 4.2),
+      age: 0,
+      width: rand(1.2, 2.6) * this.scale,
+      hue: CONFIG.hue + rand(-6, 10),
+    });
+  }
+
+  updateMeteors(dt) {
+    this.nextMeteor -= dt;
+    if (this.nextMeteor <= 0) {
+      this.spawnMeteor();
+      this.nextMeteor = rand(CONFIG.meteorEvery[0], CONFIG.meteorEvery[1]);
+    }
+    for (let i = this.meteors.length - 1; i >= 0; i--) {
+      const m = this.meteors[i];
+      m.age += dt;
+      m.x += m.vx * dt;
+      m.y += m.vy * dt;
+      if (m.age > m.life ||
+          m.x < -m.len * 2 || m.x > this.w + m.len * 2 ||
+          m.y < -m.len * 2 || m.y > this.h + m.len * 2) {
+        this.meteors.splice(i, 1);
+      }
+    }
+  }
+
+  drawMeteors() {
+    const ctx = this.ctx;
+    for (const m of this.meteors) {
+      /* 快结束时淡出 */
+      const fade = Math.min(1, (m.life - m.age) / 0.6) * Math.min(1, m.age / 0.25);
+      if (fade <= 0) continue;
+
+      /* 贴图是朝右画的,所以按飞行方向旋转即可(不用每帧新建渐变) */
+      const ang = Math.atan2(m.vy, m.vx);
+      const sp = meteorSprite(m.len, m.width, m.hue);
+
+      ctx.globalAlpha = fade;
+      ctx.save();
+      ctx.translate(m.x, m.y);
+      ctx.rotate(ang);
+      /* 贴图中心在头部,尾巴朝负 x 方向 */
+      ctx.drawImage(sp, -sp.headX, -sp.height / 2);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /* ---------------------------------------------------------- 主循环 */
+
+  frame(dt) {
+    this.t += dt;
+    const ctx = this.ctx;
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, this.w, this.h);
+
+    ctx.globalCompositeOperation = 'lighter';   // 叠加发光
+
+    /* 整体呼吸 + 轻微旋转 */
+    const beat = 1 + Math.sin(this.t * CONFIG.beatSpeed * TAU * 0.5) * CONFIG.beatAmount;
+    const rot = Math.sin(this.t * CONFIG.rotateSpeed * TAU * 0.5) * CONFIG.rotateAmount;
+
+    /* ---- 背景碎心 ---- */
+    for (const b of this.bg) {
+      b.x += b.vx * dt * this.scale;
+      b.y += b.vy * dt * this.scale;
+      /* 出界就绕回来 */
+      if (b.x < -30) b.x = this.w + 30;
+      if (b.x > this.w + 30) b.x = -30;
+      if (b.y < -30) b.y = this.h + 30;
+      if (b.y > this.h + 30) b.y = -30;
+
+      const tw = 0.55 + 0.45 * Math.sin(this.t * b.speed + b.phase);
+      ctx.globalAlpha = CONFIG.bgAlpha * tw;
+      const sp = heartSprite(b.size, b.hue, 0.62);
+      ctx.drawImage(sp, b.x - sp.width / 2, b.y - sp.height / 2);
+    }
+    ctx.globalAlpha = 1;
+
+    /* ---- 主爱心 ---- */
+    for (const p of this.particles) {
+      /* 抖动后的方程点 */
+      const base = heartPoint(p.t);
+      const pt = { x: base.x + p.jx, y: base.y + p.jy };
+      const s = this.project(pt, beat, rot);
+
+      /* 明暗呼吸 */
+      const tw = 0.45 + 0.55 * Math.sin(this.t * p.speed + p.phase);
+      ctx.globalAlpha = 0.35 + 0.65 * tw;
+
+      const sp = heartSprite(p.size, p.hue, p.light);
+      ctx.drawImage(sp, s.x - sp.width / 2, s.y - sp.height / 2);
+    }
+    ctx.globalAlpha = 1;
+
+    /* ---- 流星(画在最上层) ---- */
+    this.updateMeteors(dt);
+    ctx.globalCompositeOperation = 'source-over';
+    this.drawMeteors();
+
+    ctx.globalCompositeOperation = 'source-over';
+  }
+}
+
+/* ================================================================ 启动 */
+
+window.addEventListener('DOMContentLoaded', () => {
+  const canvas = document.getElementById('scene');
+  const scene = new HeartScene(canvas);
+
+  let last = performance.now();
+  function loop(now) {
+    /* dt 上限 50ms:切标签页回来时不要跳帧 */
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    scene.frame(dt);
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  /* 窗口变化时重建(粒子尺寸和布局都跟尺寸有关) */
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      scene.resize();
+      scene.build();
+    }, 180);
+  });
+
+  /* 方便调试:控制台里能拿到场景对象 */
+  window.__scene = scene;
+  window.__config = CONFIG;
+});
+
+</script>
+</body>
+</html>
