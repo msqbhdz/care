@@ -207,14 +207,17 @@
      */
     rainText: '中秋节快乐',     // 雨里落的字,竖着一列列往下淌
     /*
-     * 雨的密度:列数 × 每列字数 决定观感。
-     * 越密越像"雨幕",但别调太亮 —— 主字是白色点阵,
-     * 雨太亮会把中间那行字淹没。
+     * 雨的密度:列数【按画面宽度除以列距】算出来,不写死。
+     * 窄屏(手机)会自动得到更密的列,和宽屏观感一致 ——
+     * 早先写死 58 列,在手机上就稀稀拉拉的。
+     *
+     * rainColumnGap 是列间距(px,基准 760 高度下的值),调小就更密。
      */
-    rainColumns: 58,           // 画面里有多少列
-    rainFontRatio: 0.030,      // 每列字号 = 画面宽度 * 这个比例(密了字要小一点)
-    rainSpeed: [80, 320],      // 下落速度(px/秒,按 900 高度基准)
-    rainRows: [24, 52],        // 每列竖着排多少个字
+    rainColumnGap: 9,
+    rainMaxColumns: 150,       // 列数上限,防止极端窄屏把自己撑爆
+    rainFontRatio: 0.026,      // 每列字号 = 画面宽度 * 这个比例
+    rainSpeed: [130, 520],     // 下落速度(px/秒,按 900 高度基准;越大越快)
+    rainRows: [30, 64],        // 每列竖着排多少个字
     rainAlpha: [0.12, 0.45],   // 每列整体透明度
 
     /* ---- 爱心爆发(倒计数结束瞬间) ---- */
@@ -485,13 +488,14 @@
     let rain = [];
     let rainChars = CONFIG.rainText;
 
-    function newColumn(anywhere) {
+    function newColumn(anywhere, x) {
       const size = Math.max(9, W * CONFIG.rainFontRatio);
       const lineH = size * 1.22;
       const rows = Math.round(rand(CONFIG.rainRows[0], CONFIG.rainRows[1]));
       const total = rows * lineH;
       return {
-        x: Math.random() * W,
+        /* x 由调用方给定(均匀铺开),不给就随机 —— 随机会让列重叠、疏密不均 */
+        x: (x === undefined) ? Math.random() * W : x,
         y: anywhere ? rand(-H, H) : rand(-total - H * 0.35, -total),
         vy: rand(CONFIG.rainSpeed[0], CONFIG.rainSpeed[1]) * base,
         rows: rows,
@@ -509,7 +513,17 @@
 
     function buildRain() {
       rain = [];
-      for (let i = 0; i < CONFIG.rainColumns; i++) rain.push(newColumn(true));
+      /*
+       * 列数按宽度算:列距固定(rainColumnGap * base),
+       * 于是窄屏自动列更多、宽屏列也够,观感一致。
+       * 列位置【均匀铺开】而不是随机 —— 随机会让列挤在一起、疏密不均。
+       */
+      const gap = Math.max(5, CONFIG.rainColumnGap * base);
+      const n = Math.min(CONFIG.rainMaxColumns, Math.ceil(W / gap));
+      const step = W / n;
+      for (let i = 0; i < n; i++) {
+        rain.push(newColumn(true, i * step + rand(0, step)));
+      }
     }
 
     function updateRain(dt, t) {
@@ -787,6 +801,7 @@
       _cfg: CONFIG,
       _particles: function () { return particles; },
       _dotSize: function () { return dotSize; },
+      _rainCount: function () { return rain.length; },
     };
   }
 
