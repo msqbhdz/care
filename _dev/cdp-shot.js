@@ -58,6 +58,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 (async () => {
   const args = [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
+    '--disable-sync', '--disable-features=msEdgeSyncPromo,msSyncPromo',
     '--hide-scrollbars', `--window-size=${winSize}`,
     `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, url
   ];

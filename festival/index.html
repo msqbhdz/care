@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#05070F">
+<title>节日祝福</title>
+<!--
+  ============================================================
+  节日祝福动画(粒子点阵版)
+
+  粒子变形引擎参考自:
+    Canvas Particle Morphing
+    https://github.com/fytseng/canvas-particle-morphing
+    @author Quants Note (https://www.quantsnote.com)
+    @license MIT
+
+  该项目提供了:文字轮廓采样、粒子池与缓动聚拢、
+  高 DPR 适配、手机高度塌陷兜底、IntersectionObserver 省电等做法。
+
+  本文件在其基础上的二次开发:
+    · 目标点对齐到规则网格 —— 落位后是整齐的点阵字(对齐参考视频)
+    · 点阵外观:白色小方块,逐颗呼吸
+    · 新增金色竖条代码雨背景
+    · 新增 3-2-1 倒计数与爱心爆发
+    · 新增名字输入面板、播完自动返回
+    · 去掉了鼠标/触摸排斥交互
+  ============================================================
+-->
+<style>
+  :root{
+    --bg:#05070F;
+    --panel:#141A26;
+    --line:#2C3345;
+    --text:#F2F5FF;
+    --muted:#8B94AB;
+    --accent:#4D6BFE;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;margin:0;overflow:hidden;background:var(--bg);}
+  body{
+    color:var(--text);
+    font-family:"PingFang SC","Microsoft YaHei UI","Noto Sans CJK SC",system-ui,-apple-system,sans-serif;
+  }
+  #stage{position:fixed;inset:0;display:block;}
+
+  /* ---------------- 第一屏:输入面板 ---------------- */
+  #panel{
+    position:fixed;inset:0;z-index:30;
+    display:flex;align-items:center;justify-content:center;padding:20px;
+    background:var(--bg);
+    transition:opacity .4s ease;
+  }
+  #panel.hide{opacity:0;pointer-events:none;}
+  .card{
+    width:100%;max-width:380px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:18px;
+    padding:24px 22px 20px;
+  }
+  .card h1{margin:0 0 20px;font-size:21px;font-weight:700;}
+  .field{display:flex;align-items:center;gap:10px;margin-bottom:18px;}
+  .field label{font-size:13px;color:var(--muted);white-space:nowrap;}
+  .field input{
+    flex:1;min-width:0;font:inherit;font-size:15px;
+    color:var(--text);background:#0C1017;
+    border:1px solid var(--line);border-radius:10px;
+    padding:11px 12px;outline:none;
+  }
+  .field input:focus{border-color:var(--accent);}
+  button{
+    width:100%;font:inherit;font-weight:700;font-size:16px;
+    border:0;border-radius:14px;padding:15px;
+    background:var(--accent);color:#fff;cursor:pointer;
+  }
+  button:active{opacity:.85;}
+
+  /* ---------------- 播放时底部的返回键 ---------------- */
+  #back{
+    position:fixed;left:50%;
+    bottom:calc(26px + env(safe-area-inset-bottom, 0px));
+    transform:translateX(-50%);
+    z-index:20;
+    width:auto;white-space:nowrap;
+    font:inherit;font-size:15px;font-weight:600;
+    color:var(--text);
+    background:rgba(20,26,38,.9);
+    border:1px solid #3A4356;border-radius:999px;
+    padding:11px 26px;cursor:pointer;
+    box-shadow:0 4px 16px rgba(0,0,0,.5);
+    -webkit-backdrop-filter:blur(8px);
+    backdrop-filter:blur(8px);
+    display:none;
+  }
+  #back.on{display:block;}
+  #back:active{background:#2A3145;}
+</style>
+</head>
+<body>
+
+<canvas id="stage"></canvas>
+
+<div id="panel">
+  <div class="card">
+    <h1>温馨提示</h1>
+    <div class="field">
+      <label for="name">名字</label>
+      <input id="name" type="text" autocomplete="off" maxlength="12">
+    </div>
+    <button id="go">开始</button>
+  </div>
+</div>
+
+<button id="back">← 返回</button>
+
+<script>
+/* ================================================================
+ * 节日祝福动画(粒子点阵版)
+ *
+ * 粒子引擎思路来自 fytseng/canvas-particle-morphing(MIT),
+ * 详见文件头说明。这里把落点对齐到规则网格,做出整齐的点阵字。
+ * ================================================================ */
+
+(function () {
+  'use strict';
+
+  const TAU = Math.PI * 2;
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const clamp = (v, a, b) => v < a ? a : (v > b ? b : v);
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+  const CONFIG = {
+    /*
+     * 祝福语:每句播一次,播完自动回输入界面。
+     * {NAME} 换成输入的名字 —— 只有「我的宝」三个字会被替换,「祝」保留。
+     *
+     * ❤ 后面必须跟 \uFE0E(文本变体选择符)。
+     * 不跟的话系统会把它当 emoji 渲染成一个实心色块,和旁边的点阵字完全不搭;
+     * 加上之后就用文本字形,轮廓细,采样成点阵才好看。
+     */
+    messages: [
+      '❤\uFE0E祝{NAME}❤\uFE0E',
+      '❤\uFE0E天天开心❤\uFE0E',
+      '❤\uFE0E平安喜乐❤\uFE0E',
+      '❤\uFE0E团圆不分昼夜❤\uFE0E',
+      '❤\uFE0E月有阴晴圆缺❤\uFE0E',
+      '❤\uFE0E中秋节快乐❤\uFE0E',
+    ],
+    /*
+     * 没填名字时 {NAME} 用什么。
+     * 用「你」—— 「❤祝{NAME}❤」就变成「❤祝你❤」;填了名字就是「❤祝小明❤」。
+     */
+    namePlaceholder: '你',
+
+    /* ---- 点阵字 ---- */
+    /*
+     * 点阵密度用【每个字多少点】来定,不用"间距 = 字号 * 比例"。
+     *
+     * 为什么:参考视频里字越大,点也越大,每行的点数基本不变(约 22 个)。
+     * 如果按字号比例算间距,字越大点越多,粒子数会从几百暴涨到几千,
+     * 切换时会突然冒出一大片粒子。
+     */
+    dotsPerChar: 22,           // 每个汉字横向多少个点
+    dotsPerPoint: 1,           // 每个网格点放几颗粒子
+
+    /* 字号:相对画面短边。参考视频里文字约占画面宽的七成 */
+    textSizeParam: 0.34,
+    textMaxWidthRatio: 0.88,
+
+    /* ---- 粒子 ---- */
+    particleColor: '#FFFFFF',
+    /*
+     * 每颗的边长 = 画面短边 * 这个比例。
+     * 要和点阵间距配合 —— 点占格子的 45%~60% 最像点阵屏:
+     * 太小看着散,太大就糊成一块。
+     */
+    particleSizeRatio: 0.0056,
+    /* 聚拢速度:converge 越大收得越快(每帧走掉剩余距离的比例) */
+    converge: 0.14,
+    /* 距离小于这个值就直接吸到目标上,让点阵干净利落 */
+    snapDistance: 1.5,
+
+    /* ---- 倒计数 ---- */
+    countdownFrom: 3,
+    /*
+     * 每个数字停留多久。要留足"分散 + 组合 + 看清"的时间 ——
+     * 0.8 秒太快了,数字刚成形就切走,根本看不清。
+     */
+    countdownStep: 1.5,
+    /*
+     * 数字的字号(相对画面短边)和点阵密度。
+     * 数字窄(宽约为字号的 0.55 倍),点要给得比汉字多才成形。
+     */
+    countdownSize: 0.42,
+    countdownDotsPerChar: 30,
+
+    /* ---- 每句节奏 ---- */
+    scatterTime: 0.5,          // ① 分散:粒子铺满整屏
+    morphTime: 0.7,            // ② 组合:飞回来聚成字(改字号时同步调这里)
+    holdTime: 2.2,             // ③ 停留(成形后一直保持,不再撒开)
+
+    /* ---- 背景:竖排文字雨(代码雨那种,但落的是字) ---- */
+    /*
+     * 每一列竖着堆一串字往下淌;最下面那个最亮(雨滴的头),越往上越暗。
+     * 参考视频里雨就是一根根竖直的柱子,柱子里是重复的小字。
+     */
+    rainText: '中秋节快乐',     // 雨里落的字,竖着一列列往下淌
+    /*
+     * 雨的密度:列数 × 每列字数 决定观感。
+     * 越密越像"雨幕",但别调太亮 —— 主字是白色点阵,
+     * 雨太亮会把中间那行字淹没。
+     */
+    rainColumns: 58,           // 画面里有多少列
+    rainFontRatio: 0.030,      // 每列字号 = 画面宽度 * 这个比例(密了字要小一点)
+    rainSpeed: [80, 320],      // 下落速度(px/秒,按 900 高度基准)
+    rainRows: [24, 52],        // 每列竖着排多少个字
+    rainAlpha: [0.12, 0.45],   // 每列整体透明度
+
+    /* ---- 爱心爆发(倒计数结束瞬间) ---- */
+    burstCount: 150,
+    burstRadiusRatio: 0.17,
+    burstLife: 2.6,
+
+    hue: 44,
+    maxDPR: 2,
+  };
+
+  /* ============================================================ 场景 */
+
+  function FestivalScene(canvas) {
+    const ctx = canvas.getContext('2d');
+    let W = 0, H = 0, base = 1;
+
+    function resize() {
+      const dpr = Math.min(window.devicePixelRatio || 1, CONFIG.maxDPR);
+      W = window.innerWidth;
+      H = window.innerHeight;
+      canvas.width = Math.floor(W * dpr);
+      canvas.height = Math.floor(H * dpr);
+      canvas.style.width = W + 'px';
+      canvas.style.height = H + 'px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      base = Math.min(W, H) / 760;
+    }
+
+    /* ---------------------------------------------------- 粒子池 */
+
+    let particles = [];
+    let dotSize = 4;
+
+    function makeParticle() {
+      /*
+       * 新粒子先建在画面中心;真正的"分散到各处"由 morphTo 里统一处理
+       * (见那里的 hasNew 分支),免得两处都管初始位置、容易搞混。
+       */
+      const x = W / 2, y = H * 0.46;
+      return {
+        x: x, y: y,
+        tx: W / 2, ty: H / 2,
+        vx: 0, vy: 0,
+        ease: 0.05 + Math.random() * 0.045,
+        phase: Math.random() * TAU,
+        speed: 0.02 + Math.random() * 0.02,
+        /*
+         * 显示强度。用来做淡入淡出 ——
+         * 不同句子需要的粒子数差很多(数字约 70 颗、长句约 1900 颗),
+         * 直接切换的话会有一大片粒子"啪"地冒出来。用这个渐变就平滑了。
+         */
+        a: 1,
+        on: true,
+      };
+    }
+
+    /**
+     * 把所有粒子撒到画面各处(分散)。
+     *
+     * 用【整屏均匀随机】,不要用极坐标画圆盘 ——
+     * 那样粒子会挤成一个椭圆"蛋",不好看。
+     * 铺满整屏才有"满屏粒子再聚成字"的观感。
+     */
+    function scatterParticles() {
+      for (const p of particles) {
+        if (!p.on) continue;
+        p.tx = Math.random() * W;
+        p.ty = Math.random() * H;
+      }
+    }
+
+    /* ---------------------------------------------------- 采样成网格点 */
+
+    /**
+     * 把文字画到离屏画布上,采样出"哪里有笔画",
+     * 然后把采样点【对齐到规则网格】—— 这是点阵整齐的关键。
+     *
+     * 采样与对齐做法参考 canvas-particle-morphing 的 getTextPoints,
+     * 并加了网格吸附。
+     */
+    function gridPoints(text, fontSize, dotsPerChar) {
+      const off = document.createElement('canvas');
+      off.width = W;
+      off.height = H;
+      const o = off.getContext('2d');
+      o.font = '700 ' + fontSize + 'px "PingFang SC","Microsoft YaHei UI",system-ui,sans-serif';
+      o.fillStyle = '#fff';
+      o.textAlign = 'center';
+      o.textBaseline = 'middle';
+      const cy = H * 0.46;
+      o.fillText(text, W / 2, cy);
+
+      const data = o.getImageData(0, 0, W, H).data;
+
+      /*
+       * 网格间距 = 单个字的实际宽度 / 每字点数。
+       *
+       * 先量出单个汉字的真实宽度(不能拿字号当字宽 —— 汉字宽度和字号不成正比,
+       * 之前那么算导致点数差了一倍,粒子数会突然暴涨)。
+       */
+      const per = Math.max(8, dotsPerChar || CONFIG.dotsPerChar);
+      const single = o.measureText('中').width || fontSize * 0.6;
+      const gap = Math.max(3, single / per);
+      dotSize = Math.max(1.6, Math.min(W, H) * CONFIG.particleSizeRatio);
+
+      /* 让网格相对文字中心对称,字看起来才居中 */
+      const x0 = W / 2 - Math.floor(W / 2 / gap) * gap;
+      const y0 = cy - Math.floor(cy / gap) * gap;
+
+      const pts = [];
+      const seen = {};
+      for (let y = y0; y < H; y += gap) {
+        for (let x = x0; x < W; x += gap) {
+          const px = Math.round(x), py = Math.round(y);
+          if (px < 0 || px >= W || py < 0 || py >= H) continue;
+          /* 看这个格子周围一小片里有没有笔画 */
+          let hit = false;
+          const r = Math.max(1, Math.floor(gap * 0.32));
+          for (let dy = -r; dy <= r && !hit; dy += r) {
+            for (let dx = -r; dx <= r; dx += r) {
+              const sx = px + dx, sy = py + dy;
+              if (sx < 0 || sx >= W || sy < 0 || sy >= H) continue;
+              if (data[(sy * W + sx) * 4 + 3] > 60) { hit = true; break; }
+            }
+          }
+          if (!hit) continue;
+          const key = px + ',' + py;
+          if (seen[key]) continue;
+          seen[key] = 1;
+          pts.push({ x: px, y: py });
+        }
+      }
+      return pts;
+    }
+
+    /**
+     * 按文字长度算字号(太长就缩小到画宽以内)。
+     * ratio 是"字号占画面短边的比例",不传就用祝福语那套;
+     * 倒计数的数字更小一些,所以要单独传。
+     */
+    function fitFontSize(text, ratio) {
+      let size = Math.min(W, H) * (ratio || CONFIG.textSizeParam);
+      ctx.font = '700 ' + size + 'px "PingFang SC","Microsoft YaHei UI",system-ui,sans-serif';
+      const maxW = W * CONFIG.textMaxWidthRatio;
+      const wpx = ctx.measureText(text).width;
+      if (wpx > maxW) size = size * (maxW / wpx);
+      return size;
+    }
+
+    /**
+     * 让粒子飞向新文字(成形)。
+     * 粒子数按网格点数动态调整:每个点恰好分配 dotsPerPoint 颗,
+     * 这样点阵不会因为粒子过多而糊成一片。
+     *
+     * 只要设过目标点,粒子就会自己飞过去 —— 所以这里只负责"定目标",
+     * 散开还是聚拢由调用方决定(见 frame 里对 scatterParticles 的调用)。
+     */
+    function morphTo(text, fontSize, dotsPerChar) {
+      const pts = gridPoints(text, fontSize, dotsPerChar);
+      if (!pts.length) return;
+
+      const need = pts.length * CONFIG.dotsPerPoint;
+
+      /*
+       * 池子不够就补。注意 makeParticle 把新粒子建在【画面正中心】,
+       * 如果就这样让它们飞向目标,粒子是从中心爆开的 —— 不对。
+       * 所以新粒子先散到画面各处,再飞回来组合(见下面的 hasNew)。
+       */
+      const before = particles.length;
+      while (particles.length < need) particles.push(makeParticle());
+      const hasNew = particles.length > before;
+      for (let i = 0; i < particles.length; i++) particles[i].on = i < need;
+
+      /* 打乱目标点顺序,粒子不会"就近抢点",聚拢看起来更自然 */
+      for (let i = pts.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const tmp = pts[i]; pts[i] = pts[j]; pts[j] = tmp;
+      }
+
+      let k = 0;
+      for (let i = 0; i < need; i++) {
+        const p = particles[i];
+        const t = pts[k];
+        k++;
+        if (k >= pts.length) k = 0;
+        /* 同一格放多颗时错开一点,但仍在格子内 —— 保持网格整齐 */
+        p.tx = t.x + (CONFIG.dotsPerPoint > 1 ? rand(-1.5, 1.5) : 0);
+        p.ty = t.y + (CONFIG.dotsPerPoint > 1 ? rand(-1.5, 1.5) : 0);
+      }
+
+      /*
+       * 有新粒子出生时:
+       *   ① 先把它们摊到画面各处 —— 否则从画面正中心出发,像"从中间炸开"
+       *   ② 显示强度从 0 开始,让它们淡入
+       */
+      if (hasNew) {
+        for (let i = before; i < particles.length; i++) {
+          const p = particles[i];
+          if (!p.on) continue;
+          /* 出生就铺在整屏随机位置,显示强度从 0 淡入 */
+          p.x = Math.random() * W;
+          p.y = Math.random() * H;
+          p.a = 0;
+        }
+      }
+    }
+
+    /**
+     * 粒子运动:直接往目标插值。
+     *
+     * 早先用的是"弹簧"模型(v += (目标-位置) * 力度,再乘摩擦),
+     * 结果在粒子多、距离远时会在目标附近高频振荡 ——
+     * 量出来"平均距离"一直卡在 150px 上下,字就糊成一条带子。
+     *
+     * 换成插值就稳:每帧把位置朝目标推进一定比例,一定收敛、不会过头。
+     * 用 1-(1-k)^(dt*60) 换算,保证不同帧率下速度一致。
+     */
+    function updateParticles(dt) {
+      const step = dt || 0.016;
+      /* 淡入淡出:约 0.35 秒充满 */
+      const da = step / 0.35;
+      /* 收敛系数:每秒走掉 (1 - (1-k)^60) 的剩余距离 */
+      const k = 1 - Math.pow(1 - CONFIG.converge, step * 60);
+
+      for (const p of particles) {
+        const want = p.on ? 1 : 0;
+        if (p.a < want) p.a = Math.min(1, p.a + da);
+        else if (p.a > want) p.a = Math.max(0, p.a - da);
+        if (!p.on) continue;
+
+        p.x += (p.tx - p.x) * k;
+        p.y += (p.ty - p.y) * k;
+        /* 已经很近了就直接吸上去,免得永远差一点点、点阵发虚 */
+        if (Math.abs(p.tx - p.x) < CONFIG.snapDistance) p.x = p.tx;
+        if (Math.abs(p.ty - p.y) < CONFIG.snapDistance) p.y = p.ty;
+        p.phase += p.speed;
+      }
+    }
+
+    function drawParticles() {
+      for (const p of particles) {
+        if (p.a <= 0.01) continue;
+        if (p.x < -10 || p.x > W + 10 || p.y < -10 || p.y > H + 10) continue;
+        const s = dotSize * (1 + Math.sin(p.phase) * 0.18);
+        /* 呼吸 * 淡入强度 */
+        ctx.globalAlpha = (0.78 + Math.sin(p.phase) * 0.22) * p.a;
+        ctx.fillStyle = CONFIG.particleColor;
+        ctx.fillRect(p.x - s / 2, p.y - s / 2, s, s);
+        /*
+         * 再叠一层很淡的光晕,让粒子从背景的文字雨里跳出来。
+         * 只要一点点 —— 太大就会糊成一片白。
+         */
+        ctx.globalAlpha *= 0.35;
+        ctx.fillRect(p.x - s * 0.9, p.y - s * 0.9, s * 1.8, s * 1.8);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    /* ---------------------------------------------------- 背景雨 */
+
+    /**
+     * 竖排文字雨(代码雨那种,但落下来的是字)。
+     *
+     * 每一列竖着堆一串字往下淌:最下面那个最亮,是"雨滴的头",
+     * 越往上越暗。参考视频里雨就是一根根竖直的柱子,柱子里是重复的小字。
+     */
+    let rain = [];
+    let rainChars = CONFIG.rainText;
+
+    function newColumn(anywhere) {
+      const size = Math.max(9, W * CONFIG.rainFontRatio);
+      const lineH = size * 1.22;
+      const rows = Math.round(rand(CONFIG.rainRows[0], CONFIG.rainRows[1]));
+      const total = rows * lineH;
+      return {
+        x: Math.random() * W,
+        y: anywhere ? rand(-H, H) : rand(-total - H * 0.35, -total),
+        vy: rand(CONFIG.rainSpeed[0], CONFIG.rainSpeed[1]) * base,
+        rows: rows,
+        lineH: lineH,
+        size: size,
+        total: total,
+        alpha: rand(CONFIG.rainAlpha[0], CONFIG.rainAlpha[1]),
+        hue: CONFIG.hue + rand(-10, 12),
+        /* 每列从哪个字开始,错开一点更像天然雨 */
+        offset: Math.floor(Math.random() * rainChars.length),
+        sway: rand(0.2, 0.7),
+        phase: rand(0, TAU),
+      };
+    }
+
+    function buildRain() {
+      rain = [];
+      for (let i = 0; i < CONFIG.rainColumns; i++) rain.push(newColumn(true));
+    }
+
+    function updateRain(dt, t) {
+      for (const c of rain) {
+        c.y += c.vy * dt;
+        c.x += Math.sin(t * c.sway + c.phase) * 5 * base * dt;
+        /* 整列落出画面就回到顶部重新开始 */
+        if (c.y - c.total > H) Object.assign(c, newColumn(false));
+      }
+    }
+
+    function drawRain() {
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      for (const c of rain) {
+        if (c.x < -c.size * 2 || c.x > W + c.size * 2) continue;
+        ctx.font = '700 ' + c.size + 'px "PingFang SC","Microsoft YaHei UI",system-ui,sans-serif';
+        for (let r = 0; r < c.rows; r++) {
+          const y = c.y + r * c.lineH;
+          if (y < -c.lineH || y > H + c.lineH) continue;
+
+          /* r 越大越靠下;最下面那个是"头",最亮 */
+          const isHead = (r === c.rows - 1);
+          const q = c.rows > 1 ? r / (c.rows - 1) : 1;
+          const a = c.alpha * (isHead ? 1 : (0.12 + 0.62 * q));
+          ctx.globalAlpha = clamp(a, 0, 1);
+
+          if (isHead) {
+            ctx.shadowColor = 'hsl(' + c.hue + ',100%,70%)';
+            ctx.shadowBlur = c.size * 0.5;
+            ctx.fillStyle = '#FFFDF5';
+          } else {
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = 'hsl(' + c.hue + ',88%,' + (5 * Math.round((38 + 26 * q) / 5)) + '%)';
+          }
+          ctx.fillText(rainChars[(r + c.offset) % rainChars.length], c.x, y);
+        }
+      }
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
+    }
+    /* ---------------------------------------------------- 爱心爆发 */
+
+    let burst = [], burstDone = false;
+
+    function heartPoint(t) {
+      return {
+        x: 16 * Math.pow(Math.sin(t), 3),
+        y: 13 * Math.cos(t) - 5 * Math.cos(2 * t)
+           - 2 * Math.cos(3 * t) - Math.cos(4 * t),
+      };
+    }
+
+    function startBurst() {
+      burst = [];
+      const R = W * CONFIG.burstRadiusRatio;
+      const cx = W / 2, cy = H * 0.46;
+      const k = R / 17;
+      for (let i = 0; i < CONFIG.burstCount; i++) {
+        const t = (i / CONFIG.burstCount) * TAU;
+        const hp = heartPoint(t);
+        const a = Math.random() * TAU;
+        const r0 = Math.random() * R * 0.35;
+        burst.push({
+          sx: cx + Math.cos(a) * r0, sy: cy + Math.sin(a) * r0,
+          tx: cx + hp.x * k, ty: cy - hp.y * k,
+          x: cx, y: cy, age: 0,
+          life: rand(CONFIG.burstLife * 0.7, CONFIG.burstLife),
+          size: rand(1.6, 4.2) * base,
+        });
+      }
+    }
+
+    function updateBurst(dt) {
+      for (const p of burst) {
+        p.age += dt;
+        const u = clamp(p.age / p.life, 0, 1);
+        const e = 1 - Math.pow(1 - u, 3);
+        p.x = p.sx + (p.tx - p.sx) * e;
+        p.y = p.sy + (p.ty - p.sy) * e;
+      }
+    }
+
+    function drawBurst() {
+      for (const p of burst) {
+        const u = clamp(p.age / p.life, 0, 1);
+        const a = u < 0.25 ? u / 0.25 : Math.pow(1 - (u - 0.25) / 0.75, 1.4);
+        if (a <= 0.01) continue;
+        ctx.globalAlpha = a * 0.95;
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    /* ---------------------------------------------------- 倒计数 */
+
+    /**
+     * 整段动画的时序。
+     *
+     * 每一句(以及倒计时的每个数字)都走同一个节奏:
+     *
+     *   分散(0.5s)  →  组合(0.7s)  →  停留
+     *
+     * 关键是【先分散再组合】:粒子先铺到画面各处,再飞回来聚成字。
+     * 之前写反了 —— 先定好文字目标再撒开,结果两者都往 tx/ty 写,
+     * 后者把前者覆盖掉,粒子根本没散开过。
+     */
+    function timeline() {
+      const CYCLE = CONFIG.scatterTime + CONFIG.morphTime;   // 分散 + 组合
+
+      /*
+       * 用两个明确的状态变量跟踪进度,不要复用同一个数字表示两种含义 ——
+       * 之前 lastMorphIndex 既当"倒计时数字序号"又当"祝福语序号*100",
+       * 两者混在一起导致每帧都判定为"换新句",反复重设目标,
+       * 粒子永远追不上到处跳的目标,字就糊成一条带子。
+       *
+       *   phaseKey  当前阶段的标识(倒计数用 'c0'~'c2',祝福语用 'm0'~'m5')
+       *   phaseStep 该阶段走到了第几步: 0=还没分散, 1=已分散(待组合), 2=已组合
+       */
+      function advance(key) {
+        if (key !== phaseKey) {
+          phaseKey = key;
+          phaseStep = 0;
+        }
+      }
+
+      if (t < textTotal()) {
+        /* ---------- 倒计数阶段 ---------- */
+        const ci = Math.floor(t / CONFIG.countdownStep);
+        advance('c' + ci);
+        if (phaseStep === 0) {
+          phaseStep = 1;
+          /* 先撒满全屏 */
+          scatterParticles();
+        }
+        /*
+         * 撒开一小会儿就把数字设成目标,之后【一直保持】——
+         * 不能成形后又撒开,那样数字刚看清就没了。
+         * 数字的"散开"是下一个数字开始时才发生的。
+         */
+        if (phaseStep === 1
+            && t - ci * CONFIG.countdownStep >= CONFIG.scatterTime
+            && ci < CONFIG.countdownFrom) {
+          phaseStep = 2;
+          const num = String(CONFIG.countdownFrom - ci);
+          morphTo(num, fitFontSize(num, CONFIG.countdownSize),
+                  CONFIG.countdownDotsPerChar);
+        }
+        return;
+      }
+
+      /* ---------- 祝福语阶段 ---------- */
+      const since = t - textTotal();
+
+      for (let i = 0; i < CONFIG.messages.length; i++) {
+        const span = CYCLE + CONFIG.holdTime;
+        const start = i * span;
+        if (since < start || since >= start + span) continue;
+
+        advance('m' + i);
+
+        /* ① 分散 */
+        if (phaseStep === 0) {
+          phaseStep = 1;
+          scatterParticles();
+        }
+        /* ② 组合 */
+        if (phaseStep === 1 && since - start >= CONFIG.scatterTime) {
+          phaseStep = 2;
+          morphTo(messageAt(i), fitFontSize(messageAt(i)));
+        }
+        return;
+      }
+    }
+
+    /* ---------------------------------------------------- 主循环 */
+
+    let t = 0;
+    let phaseKey = '';
+    let phaseStep = 0;
+    let name = '';
+
+    /**
+     * 取第 i 句祝福语,把 {NAME} 换掉。
+     *
+     * 没填名字时用「你」——
+     * 于是「❤祝{NAME}❤」就变成「❤祝你❤」,读起来自然。
+     */
+    function messageAt(i) {
+      const n = name && name.trim() ? name.trim() : CONFIG.namePlaceholder;
+      return CONFIG.messages[i].replace('{NAME}', n);
+    }
+
+    const textTotal = () => CONFIG.countdownFrom * CONFIG.countdownStep;
+    /* 每句占用:分散 + 组合 + 停留 */
+    const perText = () => CONFIG.scatterTime + CONFIG.morphTime + CONFIG.holdTime;
+    const totalDuration = () => textTotal() + perText() * CONFIG.messages.length;
+
+    function frame(dt) {
+      t += dt;
+
+      /* 背景 */
+      const bg = ctx.createLinearGradient(0, 0, 0, H);
+      bg.addColorStop(0, '#05070F');
+      bg.addColorStop(0.55, '#070C18');
+      bg.addColorStop(1, '#0A1020');
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.globalCompositeOperation = 'lighter';
+      updateRain(dt, t);
+      drawRain();
+      ctx.globalCompositeOperation = 'source-over';
+
+      if (!burstDone) {
+        burstDone = true;
+        startBurst();
+      }
+
+      /*
+       * 整段动画的时序都在这里决定 —— 粒子自己在 frame 外只负责"飞向目标"。
+       *
+       * 每一句(以及倒计时的每个数字)都是同一个节奏:
+       *     ① 分散:粒子铺到画面各处
+       *     ② 组合:飞回来聚成字
+       *     ③ 停留
+       */
+      timeline();
+
+      updateParticles(dt);
+      drawParticles();
+
+      if (burst.length) { updateBurst(dt); drawBurst(); }
+    }
+
+    return {
+      resize: function () {
+        resize();
+        buildRain();
+        /* 尺寸变了,字号跟着变,点阵要按新字号重排 */
+        if (t < textTotal()) {
+          const ci = Math.min(CONFIG.countdownFrom - 1,
+                              Math.floor(t / CONFIG.countdownStep));
+          const num = String(CONFIG.countdownFrom - Math.max(0, ci));
+          morphTo(num, fitFontSize(num, CONFIG.countdownSize),
+                  CONFIG.countdownDotsPerChar);
+        } else {
+          const span = perText();
+          const i = Math.floor((t - textTotal()) / span);
+          if (i >= 0 && i < CONFIG.messages.length) {
+            morphTo(messageAt(i), fitFontSize(messageAt(i)));
+          }
+        }
+      },
+      reset: function (newName) {
+        name = newName || '';
+        t = 0;
+        phaseKey = '';
+        phaseStep = 0;
+        burst = [];
+        burstDone = false;
+        particles = [];
+        buildRain();
+        /*
+         * 不清空粒子池、也不预先定目标 ——
+         * 交给 frame 里的倒计数逻辑:第一帧就定好"3"的目标并撒开粒子,
+         * 于是数字也是从散到聚地成形的。
+         */
+      },
+      frame: frame,
+      totalDuration: totalDuration,
+      getTime: function () { return t; },
+      /* 调试用 */
+      _cfg: CONFIG,
+      _particles: function () { return particles; },
+      _dotSize: function () { return dotSize; },
+    };
+  }
+
+  /* ============================================================ 启动 */
+
+  const canvas = document.getElementById('stage');
+  const panel = document.getElementById('panel');
+  const backBtn = document.getElementById('back');
+  const nameInput = document.getElementById('name');
+
+  const scene = FestivalScene(canvas);
+  scene.resize();
+
+  let running = false;
+  let last = performance.now();
+
+  function loop(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    if (running) {
+      scene.frame(dt);
+      if (scene.getTime() >= scene.totalDuration()) back();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  function start() {
+    scene.reset(nameInput.value);
+    panel.classList.add('hide');
+    backBtn.classList.add('on');
+    last = performance.now();
+    running = true;
+  }
+
+  function back() {
+    running = false;
+    backBtn.classList.remove('on');
+    panel.classList.remove('hide');
+    nameInput.focus();
+  }
+
+  document.getElementById('go').addEventListener('click', start);
+  backBtn.addEventListener('click', back);
+  nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') start(); });
+  window.addEventListener('keydown', (e) => { if (e.code === 'Escape' && running) back(); });
+
+  let rt = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(rt);
+    rt = setTimeout(() => scene.resize(), 180);
+  });
+
+  window.__scene = scene;
+})();
+</script>
+</body>
+</html>

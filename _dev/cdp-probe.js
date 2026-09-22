@@ -56,6 +56,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 (async () => {
   const edgeArgs = [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
+    '--disable-sync', '--disable-features=msEdgeSyncPromo,msSyncPromo',
     `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, url
   ];
   if (winSize) edgeArgs.splice(0, 0, `--window-size=${winSize}`);
